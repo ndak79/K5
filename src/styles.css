@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-serif: "Playfair Display", Georgia, serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --color-ink: #2D342F;
+  --color-paper: #FAF9F6;
+  --color-accent: #4B5E40;
+  --color-warm: #D4A373;
+  --color-sage-light: #F1EDE4;
+  --color-sage-dark: #3D4F33;
+  --color-sage-border: #E5E1D5;
+  --color-sage-hover: #E4E0D5;
+}
+
+:root {
+  color: #2D342F;
+  background-color: #FAF9F6;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+/* Material Symbols scaling and centering alignment */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+}

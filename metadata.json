@@ -1,0 +1,6 @@
+{
+  "name": "LessonNorm",
+  "description": "Chuẩn hóa chương trình học nghiệm và phân tích điểm neo học thuật tích hợp AI",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
