@@ -141,3 +141,161 @@ export async function exportLesson(lessonId: string) {
 
   return response.blob();
 }
+
+// --- BLOOM CDR OPTIMIZATION FRONTEND INTERFACE ---
+
+export interface BloomSuggestionItem {
+  subitemKey: string;
+  originalText: string;
+  category: "knowledge" | "skills" | "autonomy";
+  blockId: string;
+  suggestions: string[];
+  selectedSuggestion: string | null;
+}
+
+export interface BloomState {
+  verbs: string[];
+  lesson_suggestions: Record<string, BloomSuggestionItem[]>;
+  selected_outcomes: Record<string, string[]>;
+  course_suggestions: BloomSuggestionItem[];
+  selected_course_outcomes: string[];
+  status: "idle" | "generating" | "synthesizing" | "ready" | "failed";
+  error: string | null;
+}
+
+export async function fetchBloomSession(): Promise<any> {
+  const payload = await parseJson<{ success: boolean; session: any }>(
+    await fetch(`${API_BASE_URL}/api/bloom/session`)
+  );
+  return payload.session;
+}
+
+export async function uploadBloomCdr(file: File): Promise<any> {
+  const formData = new FormData();
+  formData.append("cdr_file", file);
+  const response = await fetch(`${API_BASE_URL}/api/bloom/upload/cdr`, {
+    method: "POST",
+    body: formData
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi tải file CDR: HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  return payload.session;
+}
+
+export async function uploadBloomGt(file: File): Promise<any> {
+  const formData = new FormData();
+  formData.append("gt_file", file);
+  const response = await fetch(`${API_BASE_URL}/api/bloom/upload/gt`, {
+    method: "POST",
+    body: formData
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi tải file Giáo trình: HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  return payload.session;
+}
+
+export async function fetchBloomState(): Promise<BloomState> {
+  const payload = await parseJson<{ success: boolean; data: BloomState }>(
+    await fetch(`${API_BASE_URL}/api/bloom/state`)
+  );
+  return payload.data;
+}
+
+export async function updateBloomVerbs(verbs: string[]): Promise<BloomState> {
+  const payload = await parseJson<{ success: boolean; data: BloomState }>(
+    await fetch(`${API_BASE_URL}/api/bloom/verbs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ verbs })
+    })
+  );
+  return payload.data;
+}
+
+export async function generateLessonSuggestions(lessonId: string): Promise<{ suggestions: string[]; state: BloomState }> {
+  const payload = await parseJson<{ success: boolean; suggestions: string[]; state: BloomState }>(
+    await fetch(`${API_BASE_URL}/api/bloom/lessons/${lessonId}/suggest`, {
+      method: "POST"
+    })
+  );
+  return payload;
+}
+
+export async function selectLessonOutcomes(lessonId: string, outcomes: string[]): Promise<BloomState> {
+  const payload = await parseJson<{ success: boolean; data: BloomState }>(
+    await fetch(`${API_BASE_URL}/api/bloom/lessons/${lessonId}/select`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outcomes })
+    })
+  );
+  return payload.data;
+}
+
+export async function selectBloomSubitem(lessonId: string, subitemKey: string, selectedText: string): Promise<BloomState> {
+  const payload = await parseJson<{ success: boolean; data: BloomState }>(
+    await fetch(`${API_BASE_URL}/api/bloom/lessons/${lessonId}/select-subitem`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subitemKey, selectedText })
+    })
+  );
+  return payload.data;
+}
+
+export async function generateCourseSuggestions(): Promise<{ suggestions: BloomSuggestionItem[]; state: BloomState }> {
+  const payload = await parseJson<{ success: boolean; suggestions: BloomSuggestionItem[]; state: BloomState }>(
+    await fetch(`${API_BASE_URL}/api/bloom/course/suggest`, {
+      method: "POST"
+    })
+  );
+  return payload;
+}
+
+export async function selectBloomCourseSubitem(subitemKey: string, selectedText: string): Promise<BloomState> {
+  const payload = await parseJson<{ success: boolean; data: BloomState }>(
+    await fetch(`${API_BASE_URL}/api/bloom/course/select-subitem`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subitemKey, selectedText })
+    })
+  );
+  return payload.data;
+}
+
+export async function selectCourseOutcomes(outcomes: string[]): Promise<BloomState> {
+  const payload = await parseJson<{ success: boolean; data: BloomState }>(
+    await fetch(`${API_BASE_URL}/api/bloom/course/select`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outcomes })
+    })
+  );
+  return payload.data;
+}
+
+export async function resetBloomState(): Promise<BloomState> {
+  const payload = await parseJson<{ success: boolean; data: BloomState }>(
+    await fetch(`${API_BASE_URL}/api/bloom/reset`, {
+      method: "POST"
+    })
+  );
+  return payload.data;
+}
+
+export async function exportBloomCdrBlob(): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}/api/bloom/export`, {
+    method: "POST"
+  });
+  if (!response.ok) {
+    throw new Error(`Xử lý xuất Bloom CDR lỗi: HTTP ${response.status}`);
+  }
+  return response.blob();
+}
+

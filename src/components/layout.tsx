@@ -49,10 +49,17 @@ export function Layout({
             <span>Khung CDR</span>
           </div>
 
-          <div className={`flex items-center space-x-3 px-4 py-3 rounded-xl text-ink/80 opacity-75 cursor-default`}>
-            <span className="material-symbols-outlined text-lg leading-none font-light">rule_folder</span>
-            <span>Chuẩn đầu ra</span>
-          </div>
+          <Link
+            to="/bloom-optimize"
+            className={`flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-colors ${
+              location.pathname === "/bloom-optimize"
+                ? "bg-sage-hover text-accent shadow-sm"
+                : "text-ink/80 hover:bg-sage-hover/55 hover:text-accent"
+            }`}
+          >
+            <span className="material-symbols-outlined text-lg leading-none">rule_folder</span>
+            <span>Tối ưu Bloom CDR</span>
+          </Link>
 
 
         </nav>
@@ -94,9 +101,12 @@ export function Layout({
             </div>
             <span className="text-sm font-bold text-accent font-serif">LessonNorm</span>
           </Link>
-          <div className="flex space-x-3">
-            <Link to="/" className="text-xs font-medium bg-accent text-white px-3 py-1.5 rounded-full hover:bg-sage-dark transition-colors">
+          <div className="flex space-x-2">
+            <Link to="/" className="text-xs font-medium bg-accent/10 text-accent px-3 py-1.5 rounded-full hover:bg-sage-hover transition-colors">
               Trang chủ
+            </Link>
+            <Link to="/bloom-optimize" className="text-xs font-medium bg-accent text-white px-3 py-1.5 rounded-full hover:bg-sage-dark transition-colors">
+              Tối ưu CDR
             </Link>
           </div>
         </div>

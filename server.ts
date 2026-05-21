@@ -13,8 +13,26 @@ import {
   getLessonDocument,
   getLessonInsertions,
   exportLessonDocumentToFile,
-  cancelExtractionJob
+  cancelExtractionJob,
+  getRuntimeInstance
 } from "./server/services/upload_session_service";
+import {
+  getBloomState,
+  updateBloomVerbs,
+  updateSelectedOutcomes,
+  updateSelectedCourseOutcomes,
+  resetBloomState,
+  suggestLessonOutcomes,
+  suggestCourseOutcomes,
+  compileOptimizedDocx,
+  uploadBloomCdrDocument,
+  uploadBloomGtDocument,
+  bloomRuntime,
+  getBloomRuntimeSummary,
+  resetBloomRuntime,
+  rebuildSelectedOutcomes,
+  rebuildSelectedCourseOutcomes
+} from "./server/services/bloom_service";
 import { serializeLessonPreview } from "./server/services/preview_serializer";
 
 const app = express();
@@ -150,6 +168,153 @@ app.post("/api/lessons/:id/export", (req: Request, res: Response) => {
     });
   } catch (err: any) {
     res.status(404).json({ error: err.message || "Failed to export lesson file" });
+  }
+});
+
+// --- BLOOM OPTIMIZATION API ENDPOINTS ---
+
+// GET current bloom session summary
+app.get("/api/bloom/session", (req: Request, res: Response) => {
+  res.json({ success: true, session: getBloomRuntimeSummary() });
+});
+
+// POST upload CDR file for bloom
+app.post("/api/bloom/upload/cdr", upload.single("cdr_file"), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: "Yêu cầu file đính kèm cdr_file" });
+    }
+    const summary = await uploadBloomCdrDocument(req.file.originalname, req.file.buffer);
+    res.json({ success: true, session: summary });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message || "Xử lý file CDR thất bại" });
+  }
+});
+
+// POST upload GT file for bloom
+app.post("/api/bloom/upload/gt", upload.single("gt_file"), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: "Yêu cầu file đính kèm gt_file" });
+    }
+    const summary = await uploadBloomGtDocument(req.file.originalname, req.file.buffer);
+    res.json({ success: true, session: summary });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message || "Xử lý file giáo trình thất bại" });
+  }
+});
+
+// GET current bloom state
+app.get("/api/bloom/state", (req: Request, res: Response) => {
+  res.json({ success: true, data: getBloomState() });
+});
+
+// POST update standard bloom verbs
+app.post("/api/bloom/verbs", (req: Request, res: Response) => {
+  const { verbs } = req.body;
+  if (!Array.isArray(verbs)) {
+    return res.status(400).json({ success: false, error: "Verbs must be an array of strings." });
+  }
+  const state = updateBloomVerbs(verbs);
+  res.json({ success: true, data: state });
+});
+
+// POST suggest outcomes for specific lesson
+app.post("/api/bloom/lessons/:lessonId/suggest", async (req: Request, res: Response) => {
+  try {
+    const { lessonId } = req.params;
+    const runtime = bloomRuntime;
+    const suggestions = await suggestLessonOutcomes(lessonId, runtime);
+    res.json({ success: true, suggestions, state: getBloomState() });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message || "Lỗi sinh gợi ý chuẩn đầu ra bài giảng." });
+  }
+});
+
+// POST select outcomes for lesson
+app.post("/api/bloom/lessons/:lessonId/select", (req: Request, res: Response) => {
+  const { lessonId } = req.params;
+  const { outcomes } = req.body;
+  if (!Array.isArray(outcomes)) {
+    return res.status(400).json({ success: false, error: "Outcomes must be an array of strings." });
+  }
+  const state = updateSelectedOutcomes(lessonId, outcomes);
+  res.json({ success: true, data: state });
+});
+
+// POST select single subitem suggestion for lesson
+app.post("/api/bloom/lessons/:lessonId/select-subitem", (req: Request, res: Response) => {
+  const { lessonId } = req.params;
+  const { subitemKey, selectedText } = req.body;
+  const state = getBloomState();
+  const items = state.lesson_suggestions[lessonId] || [];
+  const item = items.find(it => it.subitemKey === subitemKey);
+  if (item) {
+    item.selectedSuggestion = selectedText;
+    rebuildSelectedOutcomes(lessonId);
+  }
+  res.json({ success: true, data: getBloomState() });
+});
+
+// POST suggest overall course outcomes (CLOs)
+app.post("/api/bloom/course/suggest", async (req: Request, res: Response) => {
+  try {
+    const runtime = bloomRuntime;
+    const suggestions = await suggestCourseOutcomes(runtime);
+    res.json({ success: true, suggestions, state: getBloomState() });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message || "Lỗi tổng hợp chuẩn đầu ra môn học." });
+  }
+});
+
+// POST select overall course outcomes (CLOs)
+app.post("/api/bloom/course/select", (req: Request, res: Response) => {
+  const { outcomes } = req.body;
+  if (!Array.isArray(outcomes)) {
+    return res.status(400).json({ success: false, error: "Outcomes must be an array of strings." });
+  }
+  const state = updateSelectedCourseOutcomes(outcomes);
+  res.json({ success: true, data: state });
+});
+
+// POST select single subitem suggestion for course general outcome
+app.post("/api/bloom/course/select-subitem", (req: Request, res: Response) => {
+  const { subitemKey, selectedText } = req.body;
+  const state = getBloomState();
+  const items = state.course_suggestions || [];
+  const item = items.find(it => it.subitemKey === subitemKey);
+  if (item) {
+    item.selectedSuggestion = selectedText;
+    rebuildSelectedCourseOutcomes();
+  }
+  res.json({ success: true, data: getBloomState() });
+});
+
+// POST reset bloom session state
+app.post("/api/bloom/reset", (req: Request, res: Response) => {
+  const state = resetBloomState();
+  resetBloomRuntime();
+  res.json({ success: true, data: state });
+});
+
+// POST compile and export updated CDR document (.docx)
+app.post("/api/bloom/export", (req: Request, res: Response) => {
+  try {
+    const runtime = bloomRuntime;
+    const tempFile = path.join(os.tmpdir(), `bloom_optimized_cdr_${Date.now()}.docx`);
+    compileOptimizedDocx(runtime, tempFile);
+
+    res.download(tempFile, `CDR_Toi_Uu_Hoa_Bloom.docx`, (err) => {
+      try {
+        if (path.resolve(tempFile).startsWith(os.tmpdir())) {
+          path.resolve(tempFile) && fs.existsSync(tempFile) && fs.unlinkSync(tempFile);
+        }
+      } catch (cancelErr) {
+        console.warn("Bloom clean up minor failure:", cancelErr);
+      }
+    });
+  } catch (err: any) {
+    res.status(450).json({ error: err.message || "Xử lý tạo tài liệu tối ưu thất bại." });
   }
 });
 

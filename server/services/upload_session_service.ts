@@ -177,6 +177,10 @@ export function getSessionSummary(): UploadSessionSummary {
   return toSummary();
 }
 
+export function getRuntimeInstance(): SessionRuntime {
+  return RUNTIME;
+}
+
 export async function uploadCdrDocument(filename: string, fileBuffer: Buffer): Promise<UploadSessionSummary> {
   resetAll();
   const version = RUNTIME.version;
