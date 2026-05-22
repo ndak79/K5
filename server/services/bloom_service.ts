@@ -233,30 +233,27 @@ export async function uploadBloomGtDocument(filename: string, fileBuffer: Buffer
 }
 
 function getAllowedVerbsForKey(key: string): string[] {
-  const match = key.match(/(\d+)\.(\d+)/);
-  if (match) {
-    const major = parseInt(match[1], 10);
-    const minor = parseInt(match[2], 10);
-    if (major === 1) {
-      return minor % 2 !== 0 
-        ? ["Hiểu được", "Trình bày được", "Giải thích được"] 
-        : ["Phân tích được"];
-    } else if (major === 2) {
-      return minor % 2 !== 0 
-        ? ["Thực hiện được", "Hình thành được"] 
-        : ["Vận dụng được"];
-    } else if (major === 3) {
-      return minor % 2 !== 0 
-        ? ["Tuân thủ", "Chủ động", "Tích cực"] 
-        : ["Đấu tranh", "Thực hiện"];
-    }
-  }
-  
-  if (key.startsWith("1")) {
+  const cleanKey = key.trim();
+  if (cleanKey.startsWith("1.1")) {
     return ["Hiểu được", "Trình bày được", "Giải thích được"];
-  } else if (key.startsWith("2")) {
+  } else if (cleanKey.startsWith("1.2")) {
+    return ["Phân tích được"];
+  } else if (cleanKey.startsWith("2.1")) {
+    return ["Thực hiện được", "Hình thành được"];
+  } else if (cleanKey.startsWith("2.2")) {
+    return ["Vận dụng được"];
+  } else if (cleanKey.startsWith("3.1")) {
+    return ["Tuân thủ", "Chủ động", "Tích cực"];
+  } else if (cleanKey.startsWith("3.2")) {
+    return ["Đấu tranh", "Thực hiện"];
+  }
+
+  // Fallbacks
+  if (cleanKey.startsWith("1")) {
+    return ["Hiểu được", "Trình bày được", "Giải thích được", "Phân tích được"];
+  } else if (cleanKey.startsWith("2")) {
     return ["Thực hiện được", "Hình thành được", "Vận dụng được"];
-  } else if (key.startsWith("3")) {
+  } else if (cleanKey.startsWith("3")) {
     return ["Tuân thủ", "Chủ động", "Tích cực", "Đấu tranh", "Thực hiện"];
   }
   return ["Hiểu được", "Trình bày được", "Giải thích được", "Phân tích được"];
@@ -324,6 +321,51 @@ function getAi(): GoogleGenAI | null {
   });
 }
 
+async function generateContentWithRetry(ai: GoogleGenAI, args: any, maxAttempts = 6): Promise<any> {
+  let attempt = 0;
+  let delay = 4000; // start with 4 seconds for the first 429 retry
+  while (true) {
+    try {
+      return await ai.models.generateContent(args);
+    } catch (err: any) {
+      attempt++;
+      const errorMessage = err.message || String(err);
+      const isRateLimit = errorMessage.includes("429") || 
+                          errorMessage.includes("RESOURCE_EXHAUSTED") || 
+                          errorMessage.includes("Quota exceeded") || 
+                          err.status === 429;
+      
+      if (isRateLimit && attempt < maxAttempts) {
+        let customDelay = delay;
+        const match = errorMessage.match(/retry in ([\d.]+)s/i);
+        if (match) {
+          const seconds = parseFloat(match[1]);
+          if (!isNaN(seconds)) {
+            customDelay = (seconds + 1.5) * 1000;
+          }
+        } else {
+          try {
+            const parsed = JSON.parse(errorMessage);
+            const delayStr = parsed?.error?.details?.[0]?.retryDelay;
+            if (delayStr && typeof delayStr === 'string') {
+              const seconds = parseFloat(delayStr);
+              if (!isNaN(seconds)) {
+                customDelay = (seconds + 1.5) * 1000;
+              }
+            }
+          } catch (_) {}
+        }
+        
+        console.warn(`[GEMINI RATE LIMIT] Gặp lỗi 429 (Mã lỗi: RESOURCE_EXHAUSTED - Thử lại lần ${attempt}/${maxAttempts}). Chờ ${customDelay / 1000}s...`);
+        await new Promise(resolve => setTimeout(resolve, customDelay));
+        delay *= 1.5;
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 export function getBloomState(): BloomState {
   return bloomState;
 }
@@ -349,23 +391,65 @@ export function extractStructuredCdr(blocks: BlockNode[]): CdrSubitem[] {
   let activeCategory: "knowledge" | "skills" | "autonomy" | null = null;
   let counter = 1;
 
+  const isCategoryHeader = (catText: string): boolean => {
+    const len = catText.length;
+    if (len > 60) return false;
+    const actionVerbs = /^(v\u1eadn\s+d\u1ee5ng|th\u1ef1c\s+hi\u1ec7n|gi\u1ea3i\s+quy\u1ebft|tr\u00ecnh\s+b\u00e0y|ch\u1ee7\s+\u0111\u1ed9ng|tu\u00e2n\s+th\u1ee7|t\u00edch\s+c\u1ef1c|\u0111\u1ea5u\s+tranh|ph\u00e2n\s+t\u00edch|n\u1eafm|hi\u1ec3u|bi\u1ebft|h\u00ecnh\s+th\u00e0nh|gi\u1ea3i\s+th\u00edch)/i;
+    if (actionVerbs.test(catText.trim())) return false;
+    return true;
+  };
+
   for (const block of blocks) {
     if (block.kind !== "paragraph") continue;
     const text = block.text_preview.trim();
     if (!text) continue;
 
-    // Detect category header
-    if (/ki\u1ebfn\s*th\u1ee9c|kien\s*thuc/i.test(text)) {
+    const normalizedText = text.toLowerCase();
+
+    // 1. Detect category headers first
+    let matchedCategory = false;
+    if (/ki\u1ebfn\s*th\u1ee9c|kien\s*thuc/i.test(text) && isCategoryHeader(text)) {
       activeCategory = "knowledge";
       counter = 1;
-      continue;
-    } else if (/k\u1ef9\s*n\u0103ng|ky\s*nang|k\u0129\s*n\u0103ng/i.test(text)) {
+      matchedCategory = true;
+    } else if (/k\u1ef9\s*n\u0103ng|ky\s*nang|k\u0129\s*n\u0103ng/i.test(text) && isCategoryHeader(text)) {
       activeCategory = "skills";
       counter = 1;
-      continue;
-    } else if (/t\u1ef1\s*ch\u1ee7|tu\s*chu|tr\u00e1ch\s*nhi\u1ec7m|trach\s*nhiem/i.test(text)) {
+      matchedCategory = true;
+    } else if (/(m\u1ee9c\s+t\u1ef1\s+ch\u1ee7|t\u1ef1\s+ch\u1ee7\s*(v\u00e0|&|v\u00e0\s+ch\u1ecbu|,)\s*tr\u00e1ch\s+nhi\u1ec7m|tu\s+chu\s*(v\u00e0|&|,\s*)\s*trach\s*nhiem)/i.test(text) && isCategoryHeader(text)) {
       activeCategory = "autonomy";
       counter = 1;
+      matchedCategory = true;
+    }
+
+    if (matchedCategory) {
+      continue;
+    }
+
+    // 2. Check if we are exiting the learning outcome sections (boundaries detection)
+    // Avoid scanning paragraphs belonging to "Nội dung thực hiện" or "Kế hoạch giảng dạy" etc.
+    const exitHeadingRegex = /^\s*([IVXLCDM\u2160-\u217f]+|[4-9]|\d{2,})\s*[.\-\s:]/i;
+    const isExitPhrase = normalizedText.includes("n\u1ed9i dung th\u1ef1c hi\u1ec7n") ||
+                         normalizedText.includes("n\u1ed9i dung chi ti\u1ebft") ||
+                         normalizedText.includes("n\u1ed9i dung h\u1ecdc ph\u1ea7n") ||
+                         normalizedText.includes("n\u1ed9i dung l\u00fd thuy\u1ebft") ||
+                         normalizedText.includes("n\u1ed9i dung th\u1ef1c h\u00e0nh") ||
+                         normalizedText.includes("t\u00e0i li\u1ec7u tham kh\u1ea3o") ||
+                         normalizedText.includes("ph\u01b0\u01a1ng ph\u00e1p d\u1ea1y") ||
+                         normalizedText.includes("ph\u01b0\u01a1ng ph\u00e1p h\u1ecdc") ||
+                         normalizedText.includes("\u0111\u00e1nh gi\u00e1 h\u1ecdc ph\u1ea7n") ||
+                         normalizedText.includes("\u0111\u00e1nh gi\u00e1 k\u1ebft qu\u1ea3") ||
+                         normalizedText.includes("h\u00ecnh th\u1ee9c \u0111\u00e1nh gi\u00e1") ||
+                         normalizedText.includes("nhi\u1ec7m v\u1ee5 c\u1ee7a") ||
+                         normalizedText.includes("y\u00eau c\u1ea7u \u0111\u1ed1i v\u1edbi") ||
+                         normalizedText.includes("k\u1ebf ho\u1ea1ch gi\u1ea3ng d\u1ea1y") ||
+                         normalizedText.includes("h\u01b0\u1edbng d\u1eabn \u00f4n t\u1eadp") ||
+                         normalizedText.includes("khung ch\u01b0\u01a1ng tr\u00ecnh") ||
+                         normalizedText.includes("ph\u00e2n b\u1ed3 th\u1eddi gian") ||
+                         normalizedText.includes("th\u1eddi gian th\u1ef1c hi\u1ec7n");
+
+    if (exitHeadingRegex.test(text) || isExitPhrase) {
+      activeCategory = null;
       continue;
     }
 
@@ -373,8 +457,27 @@ export function extractStructuredCdr(blocks: BlockNode[]): CdrSubitem[] {
       // Regexp for matching sub-items like 1.1., 2.1., etc.
       const match = text.match(/^\s*((\d+(?:\.\d+)+)\s*[.\-]?\s*)(.+)$/);
       if (match) {
+        const keyVal = match[2];
+        
+        // Update local counter to match keyVal to avoid generating duplicate fallback keys later
+        const parts = keyVal.split(".");
+        if (parts.length >= 2) {
+          const secondDigit = parseInt(parts[1], 10);
+          if (!isNaN(secondDigit)) {
+            counter = Math.max(counter, secondDigit + 1);
+          }
+        }
+
+        // Avoid exact duplicate matches, append a suffix if they exist to satisfy React key uniqueness
+        let finalKey = keyVal;
+        let suffix = 1;
+        while (items.some(it => it.key === finalKey)) {
+          finalKey = `${keyVal}_${suffix}`;
+          suffix++;
+        }
+
         items.push({
-          key: match[2],
+          key: finalKey,
           label: match[1],
           originalText: match[3],
           category: activeCategory,
@@ -382,15 +485,23 @@ export function extractStructuredCdr(blocks: BlockNode[]): CdrSubitem[] {
         });
       } else {
         // Fallback: if it's text under an active category and doesn't look like another major heading
-        const isHeader = text.toLowerCase().includes("chuẩn đầu ra") || 
-                         text.toLowerCase().includes("mục tiêu") || 
-                         /^[I|V|X]+\./.test(text) || 
+        // Exclude Roman numeral section headers and table/schedule headers
+        const isHeader = text.toLowerCase().includes("chu\u1ea9n \u0111\u1ea7u ra") || 
+                         text.toLowerCase().includes("m\u1ee5c ti\u00eau") || 
+                         text.toLowerCase().includes("n\u1ed9i dung") ||
+                         /^\s*([IVXLCDM\u2160-\u217f]+|[4-9]|\d{2,})\s*[.\-\s:]/i.test(text) || 
                          text.length < 5;
         if (!isHeader && text.length > 5) {
-          const listMatch = text.match(/^\s*([+\-*•]\s*)(.+)$/);
+          const listMatch = text.match(/^\s*([+\-*\u2022]\s*)(.+)$/);
           const cleanText = listMatch ? listMatch[2] : text;
           const prefixIndex = activeCategory === "knowledge" ? 1 : activeCategory === "skills" ? 2 : 3;
-          const keySymbol = `${prefixIndex}.${counter}`;
+          
+          let keySymbol = `${prefixIndex}.${counter}`;
+          while (items.some(it => it.key === keySymbol)) {
+            counter++;
+            keySymbol = `${prefixIndex}.${counter}`;
+          }
+
           items.push({
             key: keySymbol,
             label: listMatch ? listMatch[1] : `${keySymbol}. `,
@@ -499,31 +610,35 @@ ${fullTextContent}
 --- CHUẨN ĐẦU RA GỐC CẦN TỐI ƯU HÓA ---
 ${subitems.map(item => `[${item.category.toUpperCase()}] ${item.key}. ${item.originalText}`).join("\n")}
 
---- ĐỘNG TỪ CHUẨN BLOOM CHO PHÉP CHO TỪNG NHÓM ---
-1. Nhóm Kiến thức (knowledge): "Hiểu được", "trình bày được", "giải thích được", "phân tích được"
-2. Nhóm Kỹ năng (skills): "Thực hiện được", "hình thành được", "vận dụng được"
-3. Nhóm Mức tự chủ và trách nhiệm (autonomy): "Tuân thủ", "chủ động", "đấu tranh", "tích cực", "thực hiện"
+--- QUY ĐỊNH BẮT BUỘC ĐỘNG TỪ THEO CHUẨN ĐẦU RA MỤC TIÊU (CỰC KỲ KHẮT KHE) ---
+Với mỗi chuẩn đầu ra gốc theo mã hiệu (subitemKey), bạn CHỈ được phép sử dụng các động từ quy định cứng sau đây để bắt đầu gợi ý đề xuất (tuyệt đối không dùng động từ nào khác):
+1. Với tiểu mục có mã hiệu bắt đầu bằng "1.1" (Kiến thức): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các cụm động từ: "Hiểu được", "Trình bày được", "Giải thích được".
+2. Với tiểu mục có mã hiệu bắt đầu bằng "1.2" (Kiến thức): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng cụm động từ: "Phân tích được".
+3. Với tiểu mục có mã hiệu bắt đầu bằng "2.1" (Kỹ năng): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các cụm động từ: "Thực hiện được", "Hình thành được".
+4. Với tiểu mục có mã hiệu bắt đầu bằng "2.2" (Kỹ năng): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng cụm động từ: "Vận dụng được".
+5. Với tiểu mục có mã hiệu bắt đầu bằng "3.1" (Mức tự chủ và trách nhiệm): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các động từ: "Tuân thủ", "Chủ động", "Tích cực".
+6. Với tiểu mục có mã hiệu bắt đầu bằng "3.2" (Mức tự chủ và trách nhiệm): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các động từ: "Đấu tranh", "Thực hiện".
 
 Nhiệm vụ:
-Với MỖI chuẩn đầu ra gốc ở trên, hãy đề xuất đúng CHÍNH XÁC 3 phương án gợi ý chuẩn đầu ra thay thế viết lại theo phân loại nhóm, đáp ứng yêu cầu:
-1. Bắt đầu bằng một trong các động từ chuẩn Bloom được cho trong nhóm tương ứng ở trên. Không sử dụng động từ khác ngoài nhóm quy định cho nhóm đó.
-2. Được viết lại sâu sắc hơn bám sát nội dung, kiến thức học tập cụ thể trong chương giáo trình được cung cấp.
-3. Độ dài vừa phải, văn phong khoa học quân sự chuyên nghiệp, chuẩn xác.
+Với MỖI chuẩn đầu ra gốc ở trên, hãy đề xuất đúng CHÍNH XÁC 3 phương án gợi ý chuẩn đầu ra thay thế viết lại thỏa mãn tuyệt đối quy định về động từ bắt đầu ở trên, đáp ứng yêu cầu:
+- Bắt đầu chính xác bằng từ/cụm động từ quy định cứng cho tiểu mục đó.
+- Nội dung viết lại sâu sắc, có tính chuyên môn quân sự khoa học sư phạm cao, phản ánh đúng kiến thức thực tế trong tài liệu học tập của chương.
+- Hành văn chuẩn xác, không viết lan man hay trùng lặp.
 
 Hãy trả về kết quả dưới dạng mảng JSON các đối tượng. Mỗi đối tượng có cấu trúc:
 {
-  "subitemKey": "Ký tự key gốc ví dụ 1.1",
+  "subitemKey": "Ký tự key gốc ví dụ 1.1 hoặc 1.2",
   "suggestions": [
-    "Phương án 1 bắt đầu bằng động từ chuẩn nhóm",
-    "Phương án 2 bắt đầu bằng động từ chuẩn nhóm",
-    "Phương án 3 bắt đầu bằng động từ chuẩn nhóm"
+    "Phương án gợi ý 1 bắt đầu bằng động từ chuẩn",
+    "Phương án gợi ý 2 bắt đầu bằng động từ chuẩn",
+    "Phương án gợi ý 3 bắt đầu bằng động từ chuẩn"
   ]
 }
 
 Không viết bất kỳ lời giải thích nào ngoài chuỗi JSON sạch.`;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithRetry(ai, {
       model: "gemini-3.5-flash",
       contents: prompt,
       config: {
@@ -583,6 +698,175 @@ Không viết bất kỳ lời giải thích nào ngoài chuỗi JSON sạch.`;
   }
 }
 
+// Bulk Suggest Outcomes for multiple lessons concurrently using mini-batches (safely stays under quota)
+export async function suggestBulkLessonOutcomes(lessonIds: string[], runtime: any): Promise<Record<string, BloomSuggestionItem[]>> {
+  const finalResult: Record<string, BloomSuggestionItem[]> = {};
+  const lessonsToGenerate: any[] = [];
+  
+  for (const lessonId of lessonIds) {
+    if (bloomState.lesson_suggestions[lessonId] && bloomState.lesson_suggestions[lessonId].length > 0) {
+      finalResult[lessonId] = bloomState.lesson_suggestions[lessonId];
+      continue;
+    }
+    
+    const lessonSummary = runtime.lessons?.[lessonId];
+    if (!lessonSummary) continue;
+    
+    const lessonNumber = lessonSummary.lesson_number;
+    const chapterNumber = runtime.lesson_to_chapter?.[lessonId];
+    if (chapterNumber === undefined) continue;
+    
+    const parsedGt = runtime.parsed_gt;
+    const parsedCdr = runtime.parsed_cdr;
+    if (!parsedGt || !parsedCdr) continue;
+    
+    const gtChapter = parsedGt.chapters.find((c: any) => c.chapter_number === chapterNumber);
+    const cdrLesson = parsedCdr.lessons.find((l: any) => l.lesson_number === lessonNumber);
+    if (!gtChapter) continue;
+    
+    const fullTextContent = gtChapter.blocks
+      .map((b: any) => b.text_preview)
+      .filter(Boolean)
+      .join("\n")
+      .substring(0, 3500); // 3500 chars context is more than enough
+
+    const subitems = extractStructuredCdr(cdrLesson ? cdrLesson.blocks : []);
+    if (subitems.length === 0) continue;
+    
+    lessonsToGenerate.push({
+      id: lessonId,
+      title: lessonSummary.title,
+      fullTextContent,
+      subitems
+    });
+  }
+
+  if (lessonsToGenerate.length === 0) {
+    return finalResult;
+  }
+
+  const ai = getAi();
+  if (!ai) {
+    throw new Error("Không tìm thấy GEMINI_API_KEY trong cấu hình hệ thống.");
+  }
+
+  // Split into batches of 5 to minimize risk of output truncation and utilize 80% fewer requests
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < lessonsToGenerate.length; i += BATCH_SIZE) {
+    const batch = lessonsToGenerate.slice(i, i + BATCH_SIZE);
+    
+    let prompt = `Bạn là chuyên gia sư phạm quân sự hàng đầu. Nhiệm vụ của bạn là phân tích tài liệu giảng dạy của nhiều bài học học phần quân sự dưới đây và đề xuất các phương án gợi ý viết lại Chuẩn đầu ra (CDR) tối ưu, bám sát thang đo nhận thức Bloom cho từng bài học.
+  
+NƯỚC ĐI và YÊU CẦU BẮT BUỘC SƯ PHẠM:
+Với mỗi bài học được cho, bạn phải phân tích danh sách các chuẩn đầu ra gốc trong mã hiệu (subitemKey). Đối với từng mục, đề xuất ĐÚNG CHÍNH XÁC 3 gợi ý chuẩn đầu ra thay thế, tuân thủ tuyệt đối quy định về từ/cụm động từ bắt đầu (tuyệt đối không được dùng bất cứ từ nào khác):
+1. Với tiểu mục có mã hiệu bắt đầu bằng "1.1" (Kiến thức): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các cụm động từ: "Hiểu được", "Trình bày được", "Giải thích được".
+2. Với tiểu mục có mã hiệu bắt đầu bằng "1.2" (Kiến thức): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng cụm động từ: "Phân tích được".
+3. Với tiểu mục có mã hiệu bắt đầu bằng "2.1" (Kỹ năng): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các cụm động từ: "Thực hiện được", "Hình thành được".
+4. Với tiểu mục có mã hiệu bắt đầu bằng "2.2" (Kỹ năng): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng cụm động từ: "Vận dụng được".
+5. Với tiểu mục có mã hiệu bắt đầu bằng "3.1" (Mức tự chủ và trách nhiệm): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các động từ: "Tuân thủ", "Chủ động", "Tích cực".
+6. Với tiểu mục có mã hiệu bắt đầu bằng "3.2" (Mức tự chủ và trách nhiệm): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các động từ: "Đấu tranh", "Thực hiện".
+
+Nội dung viết lại sâu sắc, có tính chuyên môn học thuật quân sự và sư phạm, phản ánh đúng kiến thức thực tế trong tài liệu học tập chương bài học đó. Hành văn chuẩn xác, không viết lan man trùng lặp.
+
+DƯỚI ĐÂY LÀ DANH SÁCH BÀI HỌC CỦA ĐỢT PHÂN TÍCH NÀY:
+`;
+
+    batch.forEach((l, idx) => {
+      prompt += `
+=== BÀI HỌC ${idx + 1}: [${l.title}] (MÃ BÀI HỌC: ${l.id}) ===
+Nội dung chương giáo trình gốc làm căn cứ học thuật:
+${l.fullTextContent}
+
+Các chuẩn đầu ra cần viết lại:
+${l.subitems.map((sub: any) => `- [subitemKey: ${sub.key}] nguyên văn: "${sub.originalText}" (Phân nhóm: ${sub.category})`).join("\n")}
+`;
+    });
+
+    prompt += `
+HÃY TRẢ VỀ kết quả duy nhất dưới dạng cấu trúc JSON sạch, đúng định dạng schema yêu cầu. Không viết thêm bất kỳ nội dung nào bên ngoài JSON.`;
+
+    try {
+      const response = await generateContentWithRetry(ai, {
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              lessons: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    lessonId: { type: Type.STRING },
+                    subitems: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          subitemKey: { type: Type.STRING },
+                          suggestions: {
+                            type: Type.ARRAY,
+                            items: { type: Type.STRING }
+                          }
+                        },
+                        required: ["subitemKey", "suggestions"]
+                      }
+                    }
+                  },
+                  required: ["lessonId", "subitems"]
+                }
+              }
+            },
+            required: ["lessons"]
+          }
+        }
+      });
+
+      const text = response.text || "{}";
+      const parsedPayload = JSON.parse(text);
+      const parsedLessons = parsedPayload.lessons || [];
+
+      for (const l of batch) {
+        const lessonData = parsedLessons.find((pl: any) => pl.lessonId === l.id);
+        const suggestionsMap = new Map<string, string[]>();
+        if (lessonData && Array.isArray(lessonData.subitems)) {
+          lessonData.subitems.forEach((s: any) => {
+            suggestionsMap.set(s.subitemKey, s.suggestions);
+          });
+        }
+
+        const lessonItems: BloomSuggestionItem[] = l.subitems.map((sub: any) => {
+          let sugs = suggestionsMap.get(sub.key);
+          if (!sugs || sugs.length < 3) {
+            const prefixes = getAllowedVerbsForKey(sub.key);
+            sugs = prefixes.map(p => `${p} ${sub.originalText.replace(/^(biết được|hiểu được|thực hiện được|hình thành được|tuân thủ|chủ động|đấu tranh|tích cực|thực hiện)\s+/i, "")}`);
+          }
+          const processedSugs = sugs.slice(0, 3).map(s => enforceVerbStructure(sub.key, s));
+          return {
+            subitemKey: sub.key,
+            originalText: sub.originalText,
+            category: sub.category,
+            blockId: sub.blockId,
+            suggestions: processedSugs,
+            selectedSuggestion: processedSugs[0] || sub.originalText
+          };
+        });
+
+        bloomState.lesson_suggestions[l.id] = lessonItems;
+        rebuildSelectedOutcomes(l.id);
+        finalResult[l.id] = lessonItems;
+      }
+    } catch (err: any) {
+      console.error("Lỗi khi sinh hàng loạt:", err);
+      throw new Error(`Lỗi sinh gợi ý chuẩn Bloom hàng loạt: ${err.message || err}`);
+    }
+  }
+
+  return finalResult;
+}
+
 // Synthesize Course Outcomes
 export async function suggestCourseOutcomes(runtime: any): Promise<BloomSuggestionItem[]> {
   const ai = getAi();
@@ -618,13 +902,13 @@ Nhiệm vụ: Hãy tổng hợp và nâng tầm nâng cao khái quát các chu�
 Yêu cầu cấu trúc xuất ra cực kỳ nghiêm ngặt:
 1. Phân bổ thành đúng 3 nhóm lớn: Kiến thức (category = "knowledge"), Kỹ năng (category = "skills"), Mức tự chủ và trách nhiệm (category = "autonomy").
 2. Mỗi nhóm phải có đúng KHÁC NHAU 2 tiểu mục mã số (Ví dụ: nhóm kiến thức có key 1.1 và 1.2, nhóm kỹ năng có key 2.1 và 2.2, nhóm tự chủ có key 3.1 và 3.2). Tổng cộng là 6 tiểu mục.
-3. Với MỖI tiểu mục, hãy đề xuất đúng CHÍNH XÁC 3 phương án gợi ý viết lại bám sát mức độ Bloom tương ứng và nội dung giảng dạy của học phần:
-   - Tiểu mục 1.1 (Kiến thức): Gợi ý bắt đầu bằng một trong các động từ: "Hiểu được", "trình bày được", "giải thích được"
-   - Tiểu mục 1.2 (Kiến thức): Gợi ý bắt đầu bằng: "Phân tích được"
-   - Tiểu mục 2.1 (Kỹ năng): Gợi ý bắt đầu bằng một trong các động từ: "Thực hiện được", "hình thành được"
-   - Tiểu mục 2.2 (Kỹ năng): Gợi ý bắt đầu bằng: "Vận dụng được"
-   - Tiểu mục 3.1 (Mức tự chủ, trách nhiệm): Gợi ý bắt đầu bằng: "Tuân thủ", "chủ động", "tích cực"
-   - Tiểu mục 3.2 (Mức tự chủ, trách nhiệm): Gợi ý bắt đầu bằng: "Đấu tranh", "thực hiện"
+3. Với MỖI tiểu mục, hãy đề xuất đúng CHÍNH XÁC 3 phương án gợi ý viết lại bắt đầu đúng bằng từ/cụm động từ bám sát mức độ Bloom sau đây (viết hoa chữ cái đầu tiên):
+   - Tiểu mục 1.1 (Kiến thức): Phương án gợi ý PHẢI bắt đầu bằng một trong các động từ: "Hiểu được", "Trình bày được", "Giải thích được".
+   - Tiểu mục 1.2 (Kiến thức): Phương án gợi ý PHẢI bắt đầu bằng động từ: "Phân tích được".
+   - Tiểu mục 2.1 (Kỹ năng): Phương án gợi ý PHẢI bắt đầu bằng một trong các động từ: "Thực hiện được", "Hình thành được".
+   - Tiểu mục 2.2 (Kỹ năng): Phương án gợi ý PHẢI bắt đầu bằng động từ: "Vận dụng được".
+   - Tiểu mục 3.1 (Mức tự chủ, trách nhiệm): Phương án gợi ý PHẢI bắt đầu bằng một trong các động từ: "Tuân thủ", "Chủ động", "Tích cực".
+   - Tiểu mục 3.2 (Mức tự chủ, trách nhiệm): Phương án gợi ý PHẢI bắt đầu bằng một trong các động từ: "Đấu tranh", "Thực hiện".
 
 Đầu ra của bạn phải là một mảng gồm đúng 6 đối tượng JSON với cấu trúc:
 [
@@ -642,7 +926,7 @@ Yêu cầu cấu trúc xuất ra cực kỳ nghiêm ngặt:
 Không viết bất kỳ lời giải thích nào khác ngoài chuỗi JSON sạch.`;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithRetry(ai, {
       model: "gemini-3.5-flash",
       contents: prompt,
       config: {
@@ -816,7 +1100,7 @@ export function compileOptimizedDocx(runtime: any, outputPath: string): string {
       return boundary;
     };
 
-    const replaceCategory = (headingIdx: number, categoryKey: "knowledge" | "skills" | "autonomy") => {
+    const replaceCategory = (headingIdx: number, categoryKey: "knowledge" | "skills" | "autonomy", categoryNum: number) => {
       if (headingIdx === -1) return;
       const boundaryIdx = getCategoryBoundary(headingIdx);
       const targetNode = blockNodes[headingIdx].node;
@@ -839,19 +1123,28 @@ export function compileOptimizedDocx(runtime: any, outputPath: string): string {
       let insertRef = targetNode.nextSibling;
       const catItems = bloomState.course_suggestions.filter(it => it.category === categoryKey);
 
+      let seqIdx = 1;
       catItems.forEach(item => {
         if (!item.selectedSuggestion) return;
-        const textContent = `${item.subitemKey}. ${item.selectedSuggestion}`;
+        const cleanSug = item.selectedSuggestion.replace(/^\s*\d+(?:\.\d+)*\s*[.\-]?\s*/, "");
+        const textContent = `${categoryNum}.${seqIdx}. ${cleanSug}`;
+        seqIdx++;
         const itemXml = `<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
           <w:pPr>
-            <w:ind w:left="360"/>
+            <w:jc w:val="both"/>
+            <w:ind w:left="0" w:right="0" w:firstLine="720"/>
+            <w:spacing w:before="80" w:after="0" w:line="240" w:lineRule="auto"/>
             <w:rPr>
               <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/>
+              <w:sz w:val="28"/>
+              <w:szCs w:val="28"/>
             </w:rPr>
           </w:pPr>
           <w:r>
             <w:rPr>
               <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/>
+              <w:sz w:val="28"/>
+              <w:szCs w:val="28"/>
             </w:rPr>
             <w:t>${textContent}</w:t>
           </w:r>
@@ -862,9 +1155,26 @@ export function compileOptimizedDocx(runtime: any, outputPath: string): string {
       });
     };
 
-    replaceCategory(courseKnowledgeIdx, "knowledge");
-    replaceCategory(courseSkillsIdx, "skills");
-    replaceCategory(courseAutonomyIdx, "autonomy");
+    let courseKHeader = "1. Kiến thức";
+    let courseSHeader = "2. Kỹ năng";
+    let courseAHeader = "3. Mức tự chủ và trách nhiệm";
+
+    if (courseKnowledgeIdx !== -1) courseKHeader = blockNodes[courseKnowledgeIdx].text;
+    if (courseSkillsIdx !== -1) courseSHeader = blockNodes[courseSkillsIdx].text;
+    if (courseAutonomyIdx !== -1) courseAHeader = blockNodes[courseAutonomyIdx].text;
+
+    const getPrefixNum = (header: string): number | null => {
+      const match = header.match(/^\s*(\d+)/);
+      return match ? parseInt(match[1], 10) : null;
+    };
+
+    let courseKNum = getPrefixNum(courseKHeader) || 1;
+    let courseSNum = getPrefixNum(courseSHeader) || (courseKNum + 1);
+    let courseANum = getPrefixNum(courseAHeader) || (courseSNum + 1);
+
+    replaceCategory(courseKnowledgeIdx, "knowledge", courseKNum);
+    replaceCategory(courseSkillsIdx, "skills", courseSNum);
+    replaceCategory(courseAutonomyIdx, "autonomy", courseANum);
   }
 
   // For each lesson in parsed CDR, find its index range in child list
@@ -918,10 +1228,42 @@ export function compileOptimizedDocx(runtime: any, outputPath: string): string {
       // Next, we create new paragraph elements for each category and its selected items
       let insertRef = targetNode.nextSibling;
       
-      const categories: { name: string; key: "knowledge" | "skills" | "autonomy" }[] = [
-        { name: "1. Kiến thức", key: "knowledge" },
-        { name: "2. Kỹ năng", key: "skills" },
-        { name: "3. Mức tự chủ và trách nhiệm", key: "autonomy" }
+      let originalKHeader = "1. Kiến thức";
+      let originalSHeader = "2. Kỹ năng";
+      let originalAHeader = "3. Mức tự chủ và trách nhiệm";
+
+      // Scan through original blocks in this lesson to find their actual headers/names!
+      lesson.blocks.forEach((blk: any) => {
+        if (blk.kind !== "paragraph") return;
+        const text = blk.text_preview.trim();
+        const textLower = text.toLowerCase();
+        
+        const isHeader = text.length <= 60 && !/^(v\u1eadn\s+d\u1ee5ng|th\u1ef1c\s+hi\u1ec7n|gi\u1ea3i\s+quy\u1ebft|tr\u00ecnh\s+b\u00e0y|ch\u1ee7\s+\u0111\u1ed9ng|tu\u00e2n\s+th\u1ee7|t\u00edch\s+c\u1ef1c|\u0111\u1ea5u\s+tranh|ph\u00e2n\s+t\u00edch|n\u1eafm|hi\u1ec3u|bi\u1ebft|h\u00ecnh\s+th\u00e0nh|gi\u1ea3i\s+th\u00edch)/i.test(text);
+
+        if (isHeader) {
+          if (/ki\u1ebfn\s*th\u1ee9c|kien\s*thuc/i.test(textLower)) {
+            originalKHeader = text;
+          } else if (/k\u1ef9\s*n\u0103ng|ky\s*nang|k\u0129\s*n\u0103ng/i.test(textLower)) {
+            originalSHeader = text;
+          } else if (/(m\u1ee9c\s+t\u1ef1\s+ch\u1ee7|t\u1ef1\s+ch\u1ee7\s*(v\u00e0|&|v\u00e0\s+ch\u1ecbu|,)\s*tr\u00e1ch\s+nhi\u1ec7m|tu\s+chu\s*(v\u00e0|&|,\s*)\s*trach\s*nhiem)/i.test(textLower)) {
+            originalAHeader = text;
+          }
+        }
+      });
+
+      const getPrefixNum = (header: string): number | null => {
+        const match = header.match(/^\s*(\d+)/);
+        return match ? parseInt(match[1], 10) : null;
+      };
+
+      let kNum = getPrefixNum(originalKHeader) || 1;
+      let sNum = getPrefixNum(originalSHeader) || (kNum + 1);
+      let aNum = getPrefixNum(originalAHeader) || (sNum + 1);
+
+      const categories: { name: string; key: "knowledge" | "skills" | "autonomy"; majorNum: number }[] = [
+        { name: `${kNum}. Kiến thức`, key: "knowledge", majorNum: kNum },
+        { name: `${sNum}. Kỹ năng`, key: "skills", majorNum: sNum },
+        { name: `${aNum}. Mức tự chủ và trách nhiệm`, key: "autonomy", majorNum: aNum }
       ];
 
       categories.forEach((cat) => {
@@ -935,12 +1277,16 @@ export function compileOptimizedDocx(runtime: any, outputPath: string): string {
               <w:b/>
               <w:color w:val="000000"/>
               <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/>
+              <w:sz w:val="28"/>
+              <w:szCs w:val="28"/>
             </w:rPr>
           </w:pPr>
           <w:r>
             <w:rPr>
               <w:b/>
               <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/>
+              <w:sz w:val="28"/>
+              <w:szCs w:val="28"/>
             </w:rPr>
             <w:t>${cat.name}</w:t>
           </w:r>
@@ -950,16 +1296,30 @@ export function compileOptimizedDocx(runtime: any, outputPath: string): string {
         body.insertBefore(importedCatNode, insertRef);
 
         // Create items under this Category
+        let sIdx = 1;
         catItems.forEach((item) => {
+          const cleanSug = item.selectedSuggestion.replace(/^\s*\d+(?:\.\d+)*\s*[.\-]?\s*/, "");
+          const textContent = `${cat.majorNum}.${sIdx}. ${cleanSug}`;
+          sIdx++;
+
           const itemXml = `<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
             <w:pPr>
-              <w:ind w:left="360"/>
+              <w:jc w:val="both"/>
+              <w:ind w:left="0" w:right="0" w:firstLine="720"/>
+              <w:spacing w:before="80" w:after="0" w:line="240" w:lineRule="auto"/>
+              <w:rPr>
+                <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/>
+                <w:sz w:val="28"/>
+                <w:szCs w:val="28"/>
+              </w:rPr>
             </w:pPr>
             <w:r>
               <w:rPr>
                 <w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman"/>
+                <w:sz w:val="28"/>
+                <w:szCs w:val="28"/>
               </w:rPr>
-              <w:t>${item.subitemKey}. ${item.selectedSuggestion}</w:t>
+              <w:t>${textContent}</w:t>
             </w:r>
           </w:p>`;
           const itemNode = new DOMParser().parseFromString(itemXml, "text/xml").documentElement;

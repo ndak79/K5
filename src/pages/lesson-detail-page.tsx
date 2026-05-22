@@ -74,10 +74,7 @@ export function LessonDetailPage() {
   }
 
   return (
-    <Layout
-      title={preview?.lessonTitle ?? "Chi tiết bài giảng"}
-      subtitle={`Xem trước học liệu chuẩn hóa • Chương ${preview?.lessonId ? "đã nhận diện" : "khởi tạo"}`}
-    >
+    <Layout>
       <div className="grid gap-6 xl:grid-cols-[2.5fr,1fr]">
         <LessonPreview preview={preview} onBack={() => navigate(-1)} />
         <div className="space-y-6">

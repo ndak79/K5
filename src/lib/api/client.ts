@@ -227,6 +227,17 @@ export async function generateLessonSuggestions(lessonId: string): Promise<{ sug
   return payload;
 }
 
+export async function generateBulkLessonsSuggestions(lessonIds: string[]): Promise<{ suggestions: Record<string, any>; state: BloomState }> {
+  const payload = await parseJson<{ success: boolean; suggestions: Record<string, any>; state: BloomState }>(
+    await fetch(`${API_BASE_URL}/api/bloom/lessons/suggest-bulk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lessonIds })
+    })
+  );
+  return payload;
+}
+
 export async function selectLessonOutcomes(lessonId: string, outcomes: string[]): Promise<BloomState> {
   const payload = await parseJson<{ success: boolean; data: BloomState }>(
     await fetch(`${API_BASE_URL}/api/bloom/lessons/${lessonId}/select`, {

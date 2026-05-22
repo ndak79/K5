@@ -23,6 +23,7 @@ import {
   updateSelectedCourseOutcomes,
   resetBloomState,
   suggestLessonOutcomes,
+  suggestBulkLessonOutcomes,
   suggestCourseOutcomes,
   compileOptimizedDocx,
   uploadBloomCdrDocument,
@@ -231,6 +232,21 @@ app.post("/api/bloom/lessons/:lessonId/suggest", async (req: Request, res: Respo
   }
 });
 
+// POST bulk suggest outcomes for multiple lessons (safely grouped in 5-lesson chunks)
+app.post("/api/bloom/lessons/suggest-bulk", async (req: Request, res: Response) => {
+  try {
+    const { lessonIds } = req.body;
+    if (!Array.isArray(lessonIds)) {
+      return res.status(400).json({ success: false, error: "lessonIds must be an array of strings." });
+    }
+    const runtime = bloomRuntime;
+    const bulkSuggestions = await suggestBulkLessonOutcomes(lessonIds, runtime);
+    res.json({ success: true, suggestions: bulkSuggestions, state: getBloomState() });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message || "Lỗi sinh gợi ý chuẩn đầu ra hàng loạt." });
+  }
+});
+
 // POST select outcomes for lesson
 app.post("/api/bloom/lessons/:lessonId/select", (req: Request, res: Response) => {
   const { lessonId } = req.params;
@@ -329,7 +345,7 @@ async function launchServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*all", (req: Request, res: Response) => {
+    app.get("*", (req: Request, res: Response) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

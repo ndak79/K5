@@ -1,4 +1,4 @@
-import { useEffect, useState, useTransition } from "react";
+import React, { useEffect, useState, useTransition } from "react";
 import { Layout } from "../components/layout";
 import {
   fetchBloomSession,
@@ -7,6 +7,7 @@ import {
   fetchBloomState,
   updateBloomVerbs,
   generateLessonSuggestions,
+  generateBulkLessonsSuggestions,
   selectLessonOutcomes,
   selectBloomSubitem,
   generateCourseSuggestions,
@@ -14,7 +15,8 @@ import {
   selectBloomCourseSubitem,
   resetBloomState,
   exportBloomCdrBlob,
-  type BloomState
+  type BloomState,
+  type BloomSuggestionItem
 } from "../lib/api/client";
 import type { UploadSessionSummary } from "../lib/schemas/lesson";
 import {
@@ -50,8 +52,24 @@ export function BloomOptimizePage() {
   const [state, setState] = useState<BloomState | null>(null);
   
   const cleanLessonTitle = (title: string, num: number) => {
-    const regex = /^\s*bài\s+\d+\s*[:.-]*\s*/i;
-    return title.replace(regex, "").trim();
+    if (!title) return "";
+    let cleaned = title.normalize("NFC").trim();
+    // Ultra-robust recursive stripping of "Bài X:", "bài x.", "Bài  0x - " etc.
+    // Handles Vietnamese accents, variations, and potential garbled text like "BÃ i"
+    const prefixRegexes = [
+      /^\s*(b\u00e0i|b\u00e3\s*i|bai)\s*\d+[\s:.-]*/i,
+      /^\s*ch\u01b0\u01a1ng\s*\d+[\s:.-]*/i
+    ];
+    let prev;
+    do {
+      prev = cleaned;
+      for (const regex of prefixRegexes) {
+        cleaned = cleaned.replace(regex, "");
+      }
+      cleaned = cleaned.trim();
+    } while (cleaned !== prev);
+    
+    return cleaned;
   };
   
   // Independent uploading states
@@ -64,16 +82,21 @@ export function BloomOptimizePage() {
   const [feedback, setFeedback] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
   
   // Loading transitions
-  const [isUpdatingVerbs, startVotingVerbs] = useTransition();
-  const [isResetting, startResetting] = useTransition();
-  const [isSynthesizing, startSynthesizing] = useTransition();
-  const [isExporting, startExporting] = useTransition();
+  const [isUpdatingVerbs, setIsUpdatingVerbs] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   
   // Active states
   const [generatingLessonId, setGeneratingLessonId] = useState<string | null>(null);
   const [editingLessonId, setEditingLessonId] = useState<string | null>(null);
   const [editingCourseIndex, setEditingCourseIndex] = useState<number | null>(null);
   const [tempEditText, setTempEditText] = useState("");
+
+  // Bulk processing states for sequentially calling suggestion API
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState("");
+  const [savingSubitems, setSavingSubitems] = useState<Record<string, boolean>>({});
 
   function refreshAll() {
     fetchBloomSession()
@@ -101,6 +124,9 @@ export function BloomOptimizePage() {
   const numLessonsWithSuggestions = state
     ? Object.keys(state.lesson_suggestions).length
     : 0;
+  const totalLessons = session?.lessons?.length || 0;
+  const hasSomeSuggestions = numLessonsWithSuggestions > 0;
+  const hasAllSuggestions = numLessonsWithSuggestions === totalLessons;
 
   // Dedicated upload handlers
   function handleUploadCdr(file: File) {
@@ -145,16 +171,18 @@ export function BloomOptimizePage() {
       .map((v) => v.trim())
       .filter(Boolean);
 
-    startVotingVerbs(() => {
-      updateBloomVerbs(splitVerbs)
-        .then((next) => {
-          setState(next);
-          setFeedback({ message: "Đã cập nhật danh sách động từ Bloom thành công!", type: "success" });
-        })
-        .catch((err) => {
-          setFeedback({ message: `Lỗi cập nhật danh sách: ${err.message}`, type: "error" });
-        });
-    });
+    setIsUpdatingVerbs(true);
+    updateBloomVerbs(splitVerbs)
+      .then((next) => {
+        setState(next);
+        setFeedback({ message: "Đã cập nhật danh sách động từ Bloom thành công!", type: "success" });
+      })
+      .catch((err) => {
+        setFeedback({ message: `Lỗi cập nhật danh sách: ${err.message}`, type: "error" });
+      })
+      .finally(() => {
+        setIsUpdatingVerbs(false);
+      });
   }
 
   // Suggest Outcomes for individual Lesson
@@ -172,6 +200,54 @@ export function BloomOptimizePage() {
       .finally(() => {
         setGeneratingLessonId(null);
       });
+  }
+
+  // Rate-limit safe bulk generator for all lessons using single-batch request
+  async function handleBulkGenerate(forceAll = false) {
+    if (!session || session.lessons.length === 0) return;
+    setBulkProcessing(true);
+    setFeedback(null);
+
+    const total = session.lessons.length;
+    const lessonsToGen: string[] = [];
+
+    for (let i = 0; i < total; i++) {
+      const lesson = session.lessons[i];
+      const lSugs = state?.lesson_suggestions?.[lesson.id] || [];
+      if (forceAll || lSugs.length === 0) {
+        lessonsToGen.push(lesson.id);
+      }
+    }
+
+    if (lessonsToGen.length === 0) {
+      setBulkProcessing(false);
+      setFeedback({
+        message: "Tất cả các bài học đã có thông tin gợi ý Chuẩn đầu ra Bloom và được bảo lưu.",
+        type: "info"
+      });
+      return;
+    }
+
+    setBulkStatus(`Đang tối ưu chuẩn Bloom song song cho ${lessonsToGen.length} bài học. Hệ thống sẽ gom thành từng đợt 5 bài trong 1 yêu cầu duy nhất để triệt tiêu lỗi Quota Exceeded (429)...`);
+
+    try {
+      const result = await generateBulkLessonsSuggestions(lessonsToGen);
+      setState(result.state);
+      setBulkProcessing(false);
+      setBulkStatus("");
+      setFeedback({
+        message: `Đã hoàn thành đề xuất Chuẩn đầu ra Bloom thành công cho ${lessonsToGen.length} bài học!`,
+        type: "success"
+      });
+    } catch (err: any) {
+      console.error(`Lỗi sinh hàng loạt: ${err.message}`);
+      setBulkProcessing(false);
+      setBulkStatus("");
+      setFeedback({
+        message: `Lỗi khi sinh chuẩn đầu ra hàng loạt: ${err.message}`,
+        type: "error"
+      });
+    }
   }
 
   // Toggle outline checkboxes for a lesson outcome suggestion
@@ -231,90 +307,95 @@ export function BloomOptimizePage() {
   // Synthesize Course overall Outcomes
   function handleSynthesizeCourse() {
     setFeedback(null);
-    startSynthesizing(() => {
-      generateCourseSuggestions()
-        .then((result) => {
-          setState(result.state);
-          setFeedback({ message: "Đã tổng hợp thành công Chuẩn đầu ra Môn học CLO!", type: "success" });
-        })
-        .catch((err) => {
-          setFeedback({ message: `Không thể tổng hợp học phần CLO: ${err.message}`, type: "error" });
-        });
-    });
+    setIsSynthesizing(true);
+    generateCourseSuggestions()
+      .then((result) => {
+        setState(result.state);
+        setFeedback({ message: "Đã tổng hợp thành công Chuẩn đầu ra Môn học CLO!", type: "success" });
+      })
+      .catch((err) => {
+        setFeedback({ message: `Không thể tổng hợp học phần CLO: ${err.message}`, type: "error" });
+      })
+      .finally(() => {
+        setIsSynthesizing(false);
+      });
   }
 
   // Reset workspace state
   function handleReset() {
     if (!window.confirm("Bạn có chắc muốn Reset sạch toàn bộ gợi ý tối ưu Bloom hiện tại?")) return;
-    startResetting(() => {
-      resetBloomState()
-        .then((next) => {
-          setState(next);
-          setSession(EMPTY_SESSION);
-          setFeedback({ message: "Đã dọn sạch phân tích tối ưu Bloom.", type: "info" });
-        })
-        .catch(() => {});
-    });
+    setIsResetting(true);
+    resetBloomState()
+      .then((next) => {
+        setState(next);
+        setSession(EMPTY_SESSION);
+        setFeedback({ message: "Đã dọn sạch phân tích tối ưu Bloom.", type: "info" });
+      })
+      .catch(() => {})
+      .finally(() => {
+        setIsResetting(false);
+      });
   }
 
   // Exporter
   function handleExport() {
     setFeedback(null);
-    startExporting(() => {
-      exportBloomCdrBlob()
-        .then((blob) => {
-          const url = window.URL.createObjectURL(blob);
-          const link = document.createElement("a");
-          link.href = url;
-          link.setAttribute("download", "CDR_ChuanHoa_Bloom.docx");
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-          setFeedback({ message: "Đã tích hợp, tạo tài liệu và xuất file CDR Bloom (.docx) thành công!", type: "success" });
-        })
-        .catch((err) => {
-          setFeedback({ message: `Lỗi biên dịch & xuất CDR: ${err.message}`, type: "error" });
-        });
-    });
+    setIsExporting(true);
+    exportBloomCdrBlob()
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.setAttribute("download", "CDR_ChuanHoa_Bloom.docx");
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setFeedback({ message: "Đã tích hợp, tạo tài liệu và xuất file CDR Bloom (.docx) thành công!", type: "success" });
+      })
+      .catch((err) => {
+        setFeedback({ message: `Lỗi biên dịch & xuất CDR: ${err.message}`, type: "error" });
+      })
+      .finally(() => {
+        setIsExporting(false);
+      });
   }
 
   return (
-    <Layout
-      title="Xưởng Tối Ưu Hóa Chuẩn Đầu Ra (Bloom CDR Studio)"
-      subtitle="Bản thiết kế mục tiêu bài học kỹ thuật học thức chuẩn Bloom"
-      headerActions={
-        <div className="flex items-center gap-2">
-          <button
-            onClick={refreshAll}
-            className="p-2 text-ink hover:bg-sage-hover rounded-xl transition-colors"
-            title="Làm mới trạng thái"
-          >
-            <RefreshCw className="w-5 h-5 opacity-70" />
-          </button>
-          {state && (
-            <button
-              onClick={handleReset}
-              disabled={isResetting}
-              className="px-3 py-1.5 text-xs text-red-600 border border-red-200 hover:bg-red-50 rounded-xl transition-all"
-            >
-              Reset
-            </button>
-          )}
-        </div>
-      }
-    >
+    <Layout>
       <div className="space-y-6 max-w-7xl mx-auto">
         
         {/* INDEPENDENT DECOUPLED FILE UPLOAD COMPONENT */}
         <div className="bg-white rounded-[24px] border border-sage-border p-6 shadow-sm space-y-4">
-          <div className="border-b border-sage-border pb-3">
-            <h4 className="font-bold text-accent flex items-center gap-2">
-              <Settings className="w-5 h-5 text-accent" />
-              <span>Nạp tài liệu tối ưu CDR (Tách biệt hoàn toàn)</span>
-            </h4>
-            <p className="text-xs text-ink/65 mt-0.5">
-              Trình nạp file độc lập cho xưởng Bloom. Các tài liệu nạp tại đây sẽ không làm ảnh hưởng đến tài liệu chung ở Trang chủ.
-            </p>
+          <div className="border-b border-sage-border pb-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <h4 className="font-bold text-accent flex items-center gap-2">
+                <Settings className="w-5 h-5 text-accent" />
+                <span>Nạp tài liệu tối ưu CDR (Tách biệt hoàn toàn)</span>
+              </h4>
+              <p className="text-xs text-ink/65">
+                Trình nạp file độc lập cho xưởng Bloom • Giáo trình và Khung mẫu không làm ảnh hưởng đến Trang chủ.
+              </p>
+            </div>
+            <div className="flex items-center gap-2.5 self-end md:self-auto">
+              <button
+                onClick={refreshAll}
+                className="p-2 text-ink hover:bg-sage-hover rounded-xl border border-sage-border/30 bg-white transition-colors flex items-center justify-center cursor-pointer shadow-2xs"
+                title="Làm mới trạng thái"
+                type="button"
+              >
+                <RefreshCw className="w-4 h-4 opacity-70" />
+              </button>
+              {state && (
+                <button
+                  onClick={handleReset}
+                  disabled={isResetting}
+                  className="px-4 py-2 text-xs font-bold text-red-600 border border-red-200 hover:bg-red-50 bg-white rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                  type="button"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -444,7 +525,7 @@ export function BloomOptimizePage() {
             </p>
           </div>
         ) : (
-          <div className="space-y-6 max-w-5xl mx-auto">
+          <div className="space-y-8 max-w-7xl mx-auto">
             {/* COMPREHENSIVE OVERVIEW STATUS BAR CARD */}
             {state && (
               <div className="bg-[#FAF8F5] rounded-[24px] border border-sage-border p-5 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm animate-fade-in">
@@ -484,21 +565,68 @@ export function BloomOptimizePage() {
               
               {/* STEP 1: Lesson Outcomes */}
               <div className="bg-white rounded-[24px] border border-sage-border p-6 space-y-6 shadow-sm">
-                <div className="border-b border-sage-border pb-4 flex items-center justify-between flex-wrap gap-3">
-                  <div>
-                    <span className="text-[10px] bg-accent/10 px-2.5 py-1 rounded-full text-accent font-semibold tracking-wider font-mono uppercase">
-                      BƯỚC 1
-                    </span>
-                    <h4 className="text-lg font-serif font-bold text-accent mt-1">
+                <div className="border-b border-sage-border pb-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] bg-accent/10 px-2.5 py-1 rounded-full text-accent font-bold tracking-wider font-mono uppercase">
+                        BƯỚC 1
+                      </span>
+                    </div>
+                    <h4 className="text-xl font-serif font-black text-accent mt-0.5">
                       Sinh chuẩn đầu ra của từng bài học
                     </h4>
+                    <p className="text-xs text-ink/60">
+                      Sử dụng AI phân rã chuẩn Bloom bám sát nội dung từng chương bài giảng.
+                    </p>
                   </div>
-                  <span className="text-xs text-ink/60">
-                    Sử dụng AI để so chuẩn và sinh CLO từ nội dung bài giảng.
-                  </span>
+
+                  {/* Bulk Action Button with rate-limit status */}
+                  <div className="flex flex-col sm:items-end gap-2 flex-shrink-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {hasSomeSuggestions && !hasAllSuggestions && (
+                        <button
+                          type="button"
+                          disabled={bulkProcessing || generatingLessonId !== null || session.lessons.length === 0}
+                          onClick={() => handleBulkGenerate(false)}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 disabled:opacity-45 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Sinh tiếp các bài chưa có ({totalLessons - numLessonsWithSuggestions})</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        disabled={bulkProcessing || generatingLessonId !== null || session.lessons.length === 0}
+                        onClick={() => handleBulkGenerate(hasSomeSuggestions ? true : false)}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 disabled:opacity-45 disabled:cursor-not-allowed cursor-pointer ${
+                          hasSomeSuggestions
+                            ? "bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200"
+                            : "bg-accent hover:bg-sage-dark text-white"
+                        }`}
+                      >
+                        {bulkProcessing ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Đang sinh gợi ý...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3.5 h-3.5 animate-pulse" />
+                            <span>{hasSomeSuggestions ? "Sinh lại toàn bộ bài học" : "Gợi ý CDR tất cả các bài học"}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    {bulkProcessing && (
+                      <span className="text-[10px] h-3.5 font-mono text-accent bg-accent/5 px-2 py-0.5 rounded-sm animate-pulse max-w-sm truncate text-right">
+                        {bulkStatus}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <div className="space-y-4">
+                <div className="divide-y divide-sage-border/50">
                   {session.lessons.map((lesson) => {
                     const lSugs = state?.lesson_suggestions[lesson.id] || [];
                     const lSelected = state?.selected_outcomes[lesson.id] || [];
@@ -508,20 +636,17 @@ export function BloomOptimizePage() {
                     return (
                       <div
                         key={lesson.id}
-                        className={`p-4 rounded-2xl border transition-all ${
-                          hasSugs
-                            ? "border-sage-border bg-white"
-                            : "border-slate-100 bg-[#FAFBF9]/50"
-                        }`}
+                        className="py-6 first:pt-2 last:pb-2 space-y-6 animate-fade-in"
                       >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-50 pb-3 mb-3">
+                        {/* Elegant Flat Lesson Header Stripe */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-sage-light/35 p-4 rounded-2xl border border-sage-border/20">
                           <div className="space-y-0.5">
-                            <h5 className="font-bold text-ink flex items-center gap-1.5 text-base">
-                              <span className="font-serif text-accent">Bài {lesson.lesson_number}:</span>
-                              <span>{cleanLessonTitle(lesson.title, lesson.lesson_number)}</span>
+                            <h5 className="font-bold text-ink flex items-center gap-2 text-base">
+                              <span className="font-serif text-accent text-lg">Bài {lesson.lesson_number}:</span>
+                              <span className="text-accent/90">{cleanLessonTitle(lesson.title, lesson.lesson_number)}</span>
                             </h5>
                             {lesson.chapter_title && (
-                              <p className="text-xs text-ink/50">
+                              <p className="text-xs text-ink/50 ml-1">
                                 Ánh xạ: Ch.{lesson.chapter_number} - {lesson.chapter_title}
                               </p>
                             )}
@@ -529,8 +654,8 @@ export function BloomOptimizePage() {
 
                           <button
                             onClick={() => handleGenerateLesson(lesson.id)}
-                            disabled={generatingLessonId !== null}
-                            className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all outline-none ${
+                            disabled={generatingLessonId !== null || bulkProcessing}
+                            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all outline-none disabled:opacity-40 disabled:cursor-not-allowed ${
                               hasSugs
                                 ? "bg-sage-light text-accent border border-sage-border hover:bg-sage-hover"
                                 : "bg-accent text-white hover:bg-sage-dark shadow-xs"
@@ -539,108 +664,35 @@ export function BloomOptimizePage() {
                             {isGeneratingThis ? (
                               <>
                                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                <span>Đang sinh gợi ý...</span>
+                                <span>Đang sinh...</span>
                               </>
                             ) : (
                               <>
                                 <Sparkles className="w-3.5 h-3.5" />
-                                <span>{hasSugs ? "Sinh lại gợi ý" : "Dò & Gợi ý CDR"}</span>
+                                <span>{hasSugs ? "Sinh lại gợi ý" : "Gợi ý CDR"}</span>
                               </>
                             )}
                           </button>
                         </div>
 
-                        {/* OUTCOMES SUGGESTIONS PANEL */}
+                        {/* OUTCOMES SUGGESTIONS PANEL - Flat UI, no nested box borders */}
                         {hasSugs ? (
-                          <div className="space-y-4">
-                            {lSugs.map((item) => {
-                              return (
-                                <div
-                                  key={item.subitemKey}
-                                  className="p-4 rounded-xl border border-sage-border/60 bg-[#FCFBF9] space-y-3"
-                                >
-                                  {/* Subitem original content header */}
-                                  <div className="flex items-start justify-between gap-3 border-b border-sage-border/30 pb-2">
-                                    <div>
-                                      <span className="text-[10px] font-bold text-accent uppercase tracking-wider font-mono">
-                                        {item.category === "knowledge" ? "Kiến thức" : item.category === "skills" ? "Kỹ năng" : "Tự chủ & Trách nhiệm"} ({item.subitemKey})
-                                      </span>
-                                      <p className="text-xs text-ink/70 italic mt-0.5">
-                                        Mục tiêu gốc: {item.originalText}
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  {/* 3 custom options */}
-                                  <div className="space-y-2">
-                                    <span className="text-[10px] font-bold text-ink/40 uppercase tracking-widest block">
-                                      Phương án đề xuất bám sát Bloom bài học:
-                                    </span>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-                                      {item.suggestions.map((optionText, idx) => {
-                                        const isOptionSelected = item.selectedSuggestion === optionText;
-                                        return (
-                                          <button
-                                            key={idx}
-                                            type="button"
-                                            onClick={() => {
-                                              selectBloomSubitem(lesson.id, item.subitemKey, optionText)
-                                                .then((nextState) => setState(nextState))
-                                                .catch((err) => setFeedback({ message: `Lỗi lưu lựa chọn: ${err.message}`, type: "error" }));
-                                            }}
-                                            className={`p-3 text-left rounded-xl border text-xs font-sans transition-all flex flex-col justify-between ${
-                                              isOptionSelected
-                                                ? "bg-accent/5 border-accent text-accent font-medium ring-1 ring-accent"
-                                                : "bg-white border-sage-border/50 text-ink/75 hover:bg-sage-hover"
-                                            }`}
-                                          >
-                                            <span className="leading-relaxed">{optionText}</span>
-                                            <span className="text-[8px] opacity-40 mt-1 uppercase font-bold text-right tracking-wider block">
-                                              Gợi ý {idx + 1}
-                                            </span>
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-
-                                  {/* Inline custom editing of selected option */}
-                                  <div className="pt-2 border-t border-sage-border/30 flex items-center gap-2">
-                                    <label className="text-[10px] font-bold text-ink/40 uppercase whitespace-nowrap">Hiệu chỉnh:</label>
-                                    <input
-                                      type="text"
-                                      value={item.selectedSuggestion || ""}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        const updated = { ...item, selectedSuggestion: val };
-                                        const list = state?.lesson_suggestions[lesson.id] || [];
-                                        const updatedList = list.map(it => it.subitemKey === item.subitemKey ? updated : it);
-                                        if (state) {
-                                          setState({
-                                            ...state,
-                                            lesson_suggestions: {
-                                              ...state.lesson_suggestions,
-                                              [lesson.id]: updatedList
-                                            }
-                                          });
-                                        }
-                                      }}
-                                      onBlur={() => {
-                                        selectBloomSubitem(lesson.id, item.subitemKey, item.selectedSuggestion || "")
-                                          .then((nextState) => setState(nextState))
-                                          .catch(() => {});
-                                      }}
-                                      className="flex-1 px-3 py-1.5 text-xs border border-sage-border rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-accent"
-                                    />
-                                  </div>
-                                </div>
-                              );
-                            })}
+                          <div className="space-y-7 pl-1 md:pl-3">
+                            {lSugs.map((item) => (
+                              <BloomSubitemEditor
+                                key={item.subitemKey}
+                                lessonId={lesson.id}
+                                item={item}
+                                state={state}
+                                setState={setState}
+                                setFeedback={setFeedback}
+                              />
+                            ))}
                           </div>
                         ) : (
-                          <div className="text-[11px] text-ink/40 italic flex items-center gap-1.5">
-                            <HelpCircle className="w-3.5 h-3.5" />
-                            <span>Chưa sinh gợi ý cho bài giảng này. Vui lòng bấm "Dò & Gợi ý CDR" để kích hoạt AI.</span>
+                          <div className="text-xs text-ink/40 italic flex items-center gap-1.5 pl-4">
+                            <HelpCircle className="w-3.5 h-3.5 text-ink/30" />
+                            <span>Chưa sinh gợi ý cho bài học này. Vui lòng bấm "Gợi ý CDR" để kích hoạt AI.</span>
                           </div>
                         )}
                       </div>
@@ -712,83 +764,15 @@ export function BloomOptimizePage() {
                               {grp.title}
                             </h5>
                             
-                            <div className="space-y-4">
+                            <div className="space-y-6">
                               {grpItems.map((item) => (
-                                <div
+                                <BloomCourseSubitemEditor
                                   key={item.subitemKey}
-                                  className="p-4 rounded-xl border border-sage-border/60 bg-[#FCFBF9] space-y-3"
-                                >
-                                  {/* Subitem original content header */}
-                                  <div className="flex items-start justify-between gap-3 border-b border-sage-border/30 pb-2">
-                                    <div>
-                                      <span className="text-xs font-bold text-accent uppercase tracking-wider font-semibold">
-                                        Tiểu mục chuẩn đầu ra CLO {item.subitemKey}
-                                      </span>
-                                      {item.originalText && (
-                                        <p className="text-xs text-ink/70 italic mt-0.5">
-                                          Nội dung gốc: {item.originalText}
-                                        </p>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {/* 3 suggestions */}
-                                  <div className="space-y-2">
-                                    <span className="text-[10px] font-bold text-ink/40 uppercase tracking-widest block">
-                                      Phương án đề xuất bám sát Bloom chung:
-                                    </span>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-                                      {item.suggestions.map((optionText, idx) => {
-                                        const isOptionSelected = item.selectedSuggestion === optionText;
-                                        return (
-                                          <button
-                                            key={idx}
-                                            type="button"
-                                            onClick={() => {
-                                              selectBloomCourseSubitem(item.subitemKey, optionText)
-                                                .then((nextState) => setState(nextState))
-                                                .catch((err) => setFeedback({ message: `Lỗi lưu lựa chọn CLO: ${err.message}`, type: "error" }));
-                                            }}
-                                            className={`p-3.5 text-left rounded-xl border text-sm font-sans transition-all flex flex-col justify-between cursor-pointer ${
-                                              isOptionSelected
-                                                ? "bg-accent/5 border-accent text-accent font-medium ring-1 ring-accent"
-                                                : "bg-white border-sage-border/50 text-ink/75 hover:bg-sage-hover"
-                                            }`}
-                                          >
-                                            <span className="leading-relaxed">{optionText}</span>
-                                            <span className="text-[9px] opacity-40 mt-2 uppercase font-bold text-right tracking-wider block">
-                                              Gợi ý {idx + 1}
-                                            </span>
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-
-                                  {/* Fine-tune editing */}
-                                  <div className="pt-2 border-t border-sage-border/30 flex items-center gap-2">
-                                    <label className="text-xs font-bold text-ink/50 uppercase whitespace-nowrap">Hiệu chỉnh:</label>
-                                    <input
-                                      type="text"
-                                      value={item.selectedSuggestion || ""}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        const updated = { ...item, selectedSuggestion: val };
-                                        const updatedList = state.course_suggestions.map(it => it.subitemKey === item.subitemKey ? updated : it);
-                                        setState({
-                                          ...state,
-                                          course_suggestions: updatedList
-                                        });
-                                      }}
-                                      onBlur={() => {
-                                        selectBloomCourseSubitem(item.subitemKey, item.selectedSuggestion || "")
-                                          .then((nextState) => setState(nextState))
-                                          .catch(() => {});
-                                      }}
-                                      className="flex-1 px-3.5 py-2 text-sm border border-sage-border rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-accent"
-                                    />
-                                  </div>
-                                </div>
+                                  item={item}
+                                  state={state}
+                                  setState={setState}
+                                  setFeedback={setFeedback}
+                                />
                               ))}
                             </div>
                           </div>
@@ -799,11 +783,354 @@ export function BloomOptimizePage() {
                 </div>
               </div>
 
+              {/* PERSISTENT DOWNLOAD BUTTON AT THE BOTTOM */}
+              {state && state.course_suggestions.length > 0 && (
+                <div className="bg-[#FAF8F5] rounded-[24px] border border-sage-border p-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm animate-fade-in">
+                  <div>
+                    <h5 className="font-bold text-accent font-serif text-base">Hoàn thành tất cả các bước chuẩn hóa?</h5>
+                    <p className="text-xs text-ink/65">Xuất bản đề cương chi tiết học phần đã tối ưu hóa sang định dạng Word .docx</p>
+                  </div>
+                  <button
+                    onClick={handleExport}
+                    disabled={isExporting}
+                    className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-xl text-sm transition-all shadow-md active:scale-95 cursor-pointer disabled:opacity-50"
+                  >
+                    {isExporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />}
+                    <span>Tải CDR Tối ưu (.docx)</span>
+                  </button>
+                </div>
+              )}
+
             </div>
           </div>
         )}
 
       </div>
     </Layout>
+  );
+}
+
+// --- HIGHLY-RESPONSIVE SUB-COMPONENTS WITH DECOUPLED TYPING STATE (NO LAG / FOCUS HIGHLIGHTS) ---
+
+interface BloomSubitemEditorProps {
+  key?: string | number | null;
+  lessonId: string;
+  item: BloomSuggestionItem;
+  state: BloomState | null;
+  setState: React.Dispatch<React.SetStateAction<BloomState | null>>;
+  setFeedback: (fb: { message: string; type: "success" | "error" | "info" } | null) => void;
+}
+
+function BloomSubitemEditor({ lessonId, item, state, setState, setFeedback }: BloomSubitemEditorProps) {
+  const [inputValue, setInputValue] = useState(item.selectedSuggestion || "");
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setInputValue(item.selectedSuggestion || "");
+  }, [item.selectedSuggestion]);
+
+  const handleSelectOption = (optionText: string) => {
+    if (isSaving) return;
+    setIsSaving(true);
+    setInputValue(optionText);
+    if (state) {
+      const list = state.lesson_suggestions[lessonId] || [];
+      const updatedList = list.map(it =>
+        it.subitemKey === item.subitemKey ? { ...it, selectedSuggestion: optionText } : it
+      );
+      setState({
+        ...state,
+        lesson_suggestions: {
+          ...state.lesson_suggestions,
+          [lessonId]: updatedList
+        }
+      });
+    }
+    selectBloomSubitem(lessonId, item.subitemKey, optionText)
+      .then((nextState) => {
+        setState(currentState => {
+          if (!currentState) return nextState;
+          // Synchronize and merge suggestions, keeping any newer choice the user made in local state
+          const mergedLessonSuggestions = { ...nextState.lesson_suggestions };
+          Object.keys(currentState.lesson_suggestions).forEach(lId => {
+            const curList = currentState.lesson_suggestions[lId] || [];
+            const nList = mergedLessonSuggestions[lId] || [];
+            mergedLessonSuggestions[lId] = nList.map(nItem => {
+              const curItem = curList.find(c => c.subitemKey === nItem.subitemKey);
+              if (curItem && curItem.selectedSuggestion !== nItem.selectedSuggestion) {
+                return { ...nItem, selectedSuggestion: curItem.selectedSuggestion };
+              }
+              return nItem;
+            });
+          });
+          return {
+            ...nextState,
+            lesson_suggestions: mergedLessonSuggestions
+          };
+        });
+      })
+      .catch((err) => setFeedback({ message: `Lỗi lưu lựa chọn: ${err.message}`, type: "error" }))
+      .finally(() => setIsSaving(false));
+  };
+
+  const handleSaveEdit = (val: string) => {
+    if (val === item.selectedSuggestion || isSaving) return;
+    setIsSaving(true);
+    if (state) {
+      const list = state.lesson_suggestions[lessonId] || [];
+      const updatedList = list.map(it =>
+        it.subitemKey === item.subitemKey ? { ...it, selectedSuggestion: val } : it
+      );
+      setState({
+        ...state,
+        lesson_suggestions: {
+          ...state.lesson_suggestions,
+          [lessonId]: updatedList
+        }
+      });
+    }
+    selectBloomSubitem(lessonId, item.subitemKey, val)
+      .then((nextState) => {
+        setState(currentState => {
+          if (!currentState) return nextState;
+          const mergedLessonSuggestions = { ...nextState.lesson_suggestions };
+          Object.keys(currentState.lesson_suggestions).forEach(lId => {
+            const curList = currentState.lesson_suggestions[lId] || [];
+            const nList = mergedLessonSuggestions[lId] || [];
+            mergedLessonSuggestions[lId] = nList.map(nItem => {
+              const curItem = curList.find(c => c.subitemKey === nItem.subitemKey);
+              if (curItem && curItem.selectedSuggestion !== nItem.selectedSuggestion) {
+                return { ...nItem, selectedSuggestion: curItem.selectedSuggestion };
+              }
+              return nItem;
+            });
+          });
+          return {
+            ...nextState,
+            lesson_suggestions: mergedLessonSuggestions
+          };
+        });
+      })
+      .catch((err) => setFeedback({ message: `Lỗi lưu lựa chọn: ${err.message}`, type: "error" }))
+      .finally(() => setIsSaving(false));
+  };
+
+  return (
+    <div className={`border-l-2 pl-4 py-1 space-y-3.5 transition-opacity ${isSaving ? "border-accent/40 opacity-75" : "border-accent/25"}`}>
+      <div className="flex items-start justify-between gap-3 pb-0.5">
+        <div>
+          <span className="text-[10px] font-mono font-bold text-accent bg-accent/10 px-2 py-0.5 rounded-md uppercase tracking-wider">
+            {item.category === "knowledge" ? "Kiến thức" : item.category === "skills" ? "Kỹ năng" : "Tự chủ & Trách nhiệm"} ({item.subitemKey})
+          </span>
+          <p className="text-sm text-ink/80 italic mt-2.5 leading-relaxed">
+            Mục tiêu gốc: <span className="font-semibold not-italic text-ink">{item.originalText}</span>
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <span className="text-[10px] font-bold text-ink/40 uppercase tracking-widest block">
+          Phương án đề xuất bám sát Bloom bài học:
+        </span>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {item.suggestions.map((optionText, idx) => {
+            const isOptionSelected = item.selectedSuggestion === optionText;
+            return (
+              <button
+                key={idx}
+                type="button"
+                disabled={isSaving}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // Prevents input focus losses & race-conditions!
+                  handleSelectOption(optionText);
+                }}
+                className={`p-4 text-left rounded-xl border text-xs font-medium transition-all flex flex-col justify-between cursor-pointer group ${
+                  isOptionSelected
+                    ? "bg-accent border-accent text-white shadow-xs"
+                    : "bg-[#FCFCFA] border-slate-200 text-ink/80 hover:bg-sage-hover hover:border-sage-border/70"
+                } ${isSaving ? "cursor-not-allowed opacity-80" : ""}`}
+              >
+                <span className="leading-relaxed">{optionText}</span>
+                <span className={`text-[9px] font-bold tracking-wider mt-3 block text-right uppercase ${
+                  isOptionSelected ? "text-white/60" : "text-ink/30 group-hover:text-ink/50"
+                }`}>
+                  {isSaving && isOptionSelected ? "Đang lưu..." : `Gợi ý ${idx + 1}`}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="pt-2 flex items-center gap-3">
+        <label className="text-xs font-bold text-ink/50 uppercase whitespace-nowrap">Hiệu chỉnh:</label>
+        <input
+          type="text"
+          value={inputValue}
+          disabled={isSaving}
+          onChange={(e) => setInputValue(e.target.value)}
+          onBlur={() => handleSaveEdit(inputValue)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              handleSaveEdit(inputValue);
+              e.currentTarget.blur();
+            }
+          }}
+          className="flex-1 px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-[#FAFAF8]/70 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent disabled:opacity-50"
+        />
+      </div>
+    </div>
+  );
+}
+
+interface BloomCourseSubitemEditorProps {
+  key?: string | number | null;
+  item: BloomSuggestionItem;
+  state: BloomState | null;
+  setState: React.Dispatch<React.SetStateAction<BloomState | null>>;
+  setFeedback: (fb: { message: string; type: "success" | "error" | "info" } | null) => void;
+}
+
+function BloomCourseSubitemEditor({ item, state, setState, setFeedback }: BloomCourseSubitemEditorProps) {
+  const [inputValue, setInputValue] = useState(item.selectedSuggestion || "");
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setInputValue(item.selectedSuggestion || "");
+  }, [item.selectedSuggestion]);
+
+  const handleSelectOption = (optionText: string) => {
+    if (isSaving) return;
+    setIsSaving(true);
+    setInputValue(optionText);
+    if (state) {
+      const updated = { ...item, selectedSuggestion: optionText };
+      const updatedList = state.course_suggestions.map(it => it.subitemKey === item.subitemKey ? updated : it);
+      setState({
+        ...state,
+        course_suggestions: updatedList
+      });
+    }
+    selectBloomCourseSubitem(item.subitemKey, optionText)
+      .then((nextState) => {
+        setState(currentState => {
+          if (!currentState) return nextState;
+          // Merge to preserve newer / other selections
+          const mergedCourseSuggestions = nextState.course_suggestions.map(nItem => {
+            const curItem = currentState.course_suggestions.find(c => c.subitemKey === nItem.subitemKey);
+            if (curItem && curItem.selectedSuggestion !== nItem.selectedSuggestion) {
+              return { ...nItem, selectedSuggestion: curItem.selectedSuggestion };
+            }
+            return nItem;
+          });
+          return {
+            ...nextState,
+            course_suggestions: mergedCourseSuggestions
+          };
+        });
+      })
+      .catch((err) => setFeedback({ message: `Lỗi lưu lựa chọn CLO: ${err.message}`, type: "error" }))
+      .finally(() => setIsSaving(false));
+  };
+
+  const handleSaveEdit = (val: string) => {
+    if (val === item.selectedSuggestion || isSaving) return;
+    setIsSaving(true);
+    if (state) {
+      const updated = { ...item, selectedSuggestion: val };
+      const updatedList = state.course_suggestions.map(it => it.subitemKey === item.subitemKey ? updated : it);
+      setState({
+        ...state,
+        course_suggestions: updatedList
+      });
+    }
+    selectBloomCourseSubitem(item.subitemKey, val)
+      .then((nextState) => {
+        setState(currentState => {
+          if (!currentState) return nextState;
+          const mergedCourseSuggestions = nextState.course_suggestions.map(nItem => {
+            const curItem = currentState.course_suggestions.find(c => c.subitemKey === nItem.subitemKey);
+            if (curItem && curItem.selectedSuggestion !== nItem.selectedSuggestion) {
+              return { ...nItem, selectedSuggestion: curItem.selectedSuggestion };
+            }
+            return nItem;
+          });
+          return {
+            ...nextState,
+            course_suggestions: mergedCourseSuggestions
+          };
+        });
+      })
+      .catch((err) => setFeedback({ message: `Lỗi lưu lựa chọn CLO: ${err.message}`, type: "error" }))
+      .finally(() => setIsSaving(false));
+  };
+
+  return (
+    <div className={`border-l-2 pl-4 py-1 space-y-3.5 transition-opacity ${isSaving ? "border-accent/40 opacity-75" : "border-accent/25"}`}>
+      <div className="flex items-start justify-between gap-3 pb-0.5">
+        <div>
+          <span className="text-[10px] font-mono font-bold text-accent bg-accent/10 px-2 py-0.5 rounded-md uppercase tracking-wider">
+            Tiểu mục chuẩn đầu ra CLO {item.subitemKey}
+          </span>
+          {item.originalText && (
+            <p className="text-sm text-ink/80 italic mt-2.5 leading-relaxed">
+              Nội dung gốc: <span className="font-semibold not-italic text-ink">{item.originalText}</span>
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <span className="text-[10px] font-bold text-ink/40 uppercase tracking-widest block">
+          Phương án đề xuất bám sát Bloom chung:
+        </span>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {item.suggestions.map((optionText, idx) => {
+            const isOptionSelected = item.selectedSuggestion === optionText;
+            return (
+              <button
+                key={idx}
+                type="button"
+                disabled={isSaving}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // Prevents input focus loss & race-condition!
+                  handleSelectOption(optionText);
+                }}
+                className={`p-4 text-left rounded-xl border text-xs font-medium transition-all flex flex-col justify-between cursor-pointer group ${
+                  isOptionSelected
+                    ? "bg-accent border-accent text-white shadow-xs"
+                    : "bg-[#FCFCFA] border-slate-200 text-ink/80 hover:bg-sage-hover hover:border-sage-border/70"
+                } ${isSaving ? "cursor-not-allowed opacity-80" : ""}`}
+              >
+                <span className="leading-relaxed">{optionText}</span>
+                <span className={`text-[9px] font-bold tracking-wider mt-3 block text-right uppercase ${
+                  isOptionSelected ? "text-white/60" : "text-ink/30 group-hover:text-ink/50"
+                }`}>
+                  {isSaving && isOptionSelected ? "Đang lưu..." : `Gợi ý ${idx + 1}`}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="pt-2 flex items-center gap-3">
+        <label className="text-xs font-bold text-ink/50 uppercase whitespace-nowrap">Hiệu chỉnh:</label>
+        <input
+          type="text"
+          value={inputValue}
+          disabled={isSaving}
+          onChange={(e) => setInputValue(e.target.value)}
+          onBlur={() => handleSaveEdit(inputValue)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              handleSaveEdit(inputValue);
+              e.currentTarget.blur();
+            }
+          }}
+          className="flex-1 px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-[#FAFAF8]/70 focus:bg-white focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent disabled:opacity-50"
+        />
+      </div>
+    </div>
   );
 }

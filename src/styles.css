@@ -3,7 +3,7 @@
 
 @theme {
   --font-sans: "Be Vietnam Pro", "Inter", system-ui, -apple-system, sans-serif;
-  --font-serif: "Lora", Georgia, serif;
+  --font-serif: "Be Vietnam Pro", "Inter", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 
   --color-ink: #2D342F;
@@ -19,6 +19,10 @@
 :root {
   color: #2D342F;
   background-color: #FAF9F6;
+}
+
+body, button, input, select, textarea {
+  font-family: "Be Vietnam Pro", "Inter", system-ui, -apple-system, sans-serif;
 }
 
 body {
