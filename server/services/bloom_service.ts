@@ -242,28 +242,28 @@ export async function uploadBloomGtDocument(filename: string, fileBuffer: Buffer
 function getAllowedVerbsForKey(key: string): string[] {
   const cleanKey = key.trim();
   if (cleanKey.startsWith("1.1")) {
-    return ["Hiểu được", "Trình bày được", "Giải thích được"];
+    return ["Phân tích được", "Giải thích được"];
   } else if (cleanKey.startsWith("1.2")) {
-    return ["Phân tích được"];
+    return ["Giải thích được", "Phân tích được"];
   } else if (cleanKey.startsWith("2.1")) {
-    return ["Thực hiện được", "Hình thành được"];
+    return ["Biết vận dụng", "Tiến hành được", "Nhận diện được", "Hình thành được"];
   } else if (cleanKey.startsWith("2.2")) {
-    return ["Vận dụng được"];
+    return ["Tiến hành được", "Biết vận dụng", "Nhận diện được", "Hình thành được"];
   } else if (cleanKey.startsWith("3.1")) {
-    return ["Tuân thủ", "Chủ động", "Tích cực"];
+    return ["Chủ động rèn luyện, phát triển", "Đấu tranh", "Phê phán", "Tuân thủ", "Phát huy"];
   } else if (cleanKey.startsWith("3.2")) {
-    return ["Đấu tranh", "Thực hiện"];
+    return ["Đấu tranh", "Phê phán", "Chủ động rèn luyện, phát triển", "Tuân thủ", "Phát huy"];
   }
 
   // Fallbacks
   if (cleanKey.startsWith("1")) {
-    return ["Hiểu được", "Trình bày được", "Giải thích được", "Phân tích được"];
+    return ["Phân tích được", "Giải thích được"];
   } else if (cleanKey.startsWith("2")) {
-    return ["Thực hiện được", "Hình thành được", "Vận dụng được"];
+    return ["Biết vận dụng", "Tiến hành được", "Nhận diện được", "Hình thành được"];
   } else if (cleanKey.startsWith("3")) {
-    return ["Tuân thủ", "Chủ động", "Tích cực", "Đấu tranh", "Thực hiện"];
+    return ["Chủ động rèn luyện, phát triển", "Đấu tranh", "Phê phán", "Tuân thủ", "Phát huy"];
   }
-  return ["Hiểu được", "Trình bày được", "Giải thích được", "Phân tích được"];
+  return ["Phân tích được", "Giải thích được"];
 }
 
 export function enforceVerbStructure(key: string, text: string): string {
@@ -277,7 +277,7 @@ export function enforceVerbStructure(key: string, text: string): string {
     }
   }
   
-  const commonVerbsRegex = /^(biết được|hiểu rõ|hiểu được|trình bày được|giải thích được|phân tích được|thực hiện được|hình thành được|vận dụng được|tuân thủ|chủ động|tích cực|đấu tranh|thực hiện|nắm vững|áp dụng|so sánh|đánh giá|thiết kế|xây dựng)\s+/i;
+  const commonVerbsRegex = /^(biết được|hiểu rõ|hiểu được|trình bày được|giải thích được|phân tích được|thực hiện được|tiến hành được|nhận diện được|hình thành được|vận dụng được|biết vận dụng|chủ động rèn luyện, phát triển|chủ động rèn luyện|phê phán|phát huy|tuân thủ|chủ động|tích cực|đấu tranh|thực hiện|nắm vững|áp dụng|so sánh|đánh giá|thiết kế|xây dựng)\s+/i;
   const remains = cleanText.replace(commonVerbsRegex, "").trim();
   
   const defaultVerb = allowed[0];
@@ -306,7 +306,7 @@ export interface BloomState {
 
 // In-memory persistent state for Bloom Optimization
 const bloomState: BloomState = {
-  verbs: ["phân tích", "áp dụng", "đánh giá", "thiết kế", "giải thích", "so sánh", "lập kế hoạch", "đề xuất"],
+  verbs: ["Phân tích được", "Giải thích được", "Biết vận dụng", "Tiến hành được", "Nhận diện được", "Hình thành được", "Chủ động rèn luyện, phát triển", "Đấu tranh", "Phê phán", "Tuân thủ", "Phát huy"],
   lesson_suggestions: {},
   selected_outcomes: {},
   course_suggestions: [],
@@ -620,12 +620,9 @@ ${subitems.map(item => `[${item.category.toUpperCase()}] ${item.key}. ${item.ori
 
 --- QUY ĐỊNH BẮT BUỘC ĐỘNG TỪ THEO CHUẨN ĐẦU RA MỤC TIÊU (CỰC KỲ KHẮT KHE) ---
 Với mỗi chuẩn đầu ra gốc theo mã hiệu (subitemKey), bạn CHỈ được phép sử dụng các động từ quy định cứng sau đây để bắt đầu gợi ý đề xuất (tuyệt đối không dùng động từ nào khác):
-1. Với tiểu mục có mã hiệu bắt đầu bằng "1.1" (Kiến thức): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các cụm động từ: "Hiểu được", "Trình bày được", "Giải thích được".
-2. Với tiểu mục có mã hiệu bắt đầu bằng "1.2" (Kiến thức): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng cụm động từ: "Phân tích được".
-3. Với tiểu mục có mã hiệu bắt đầu bằng "2.1" (Kỹ năng): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các cụm động từ: "Thực hiện được", "Hình thành được".
-4. Với tiểu mục có mã hiệu bắt đầu bằng "2.2" (Kỹ năng): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng cụm động từ: "Vận dụng được".
-5. Với tiểu mục có mã hiệu bắt đầu bằng "3.1" (Mức tự chủ và trách nhiệm): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các động từ: "Tuân thủ", "Chủ động", "Tích cực".
-6. Với tiểu mục có mã hiệu bắt đầu bằng "3.2" (Mức tự chủ và trách nhiệm): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các động từ: "Đấu tranh", "Thực hiện".
+1. Nhóm 1.x (Kiến thức): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các cụm động từ: "Phân tích được", "Giải thích được".
+2. Nhóm 2.x (Kỹ năng): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các cụm động từ: "Biết vận dụng", "Tiến hành được", "Nhận diện được", "Hình thành được".
+3. Nhóm 3.x (Mức tự chủ và trách nhiệm): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các cụm từ/động từ: "Chủ động rèn luyện, phát triển", "Đấu tranh", "Phê phán", "Tuân thủ", "Phát huy".
 
 Nhiệm vụ:
 Với MỖI chuẩn đầu ra gốc ở trên, hãy đề xuất đúng CHÍNH XÁC 3 phương án gợi ý chuẩn đầu ra thay thế viết lại thỏa mãn tuyệt đối quy định về động từ bắt đầu ở trên, đáp ứng yêu cầu:
@@ -767,12 +764,9 @@ export async function suggestBulkLessonOutcomes(lessonIds: string[], runtime: an
   
 NƯỚC ĐI và YÊU CẦU BẮT BUỘC SƯ PHẠM:
 Với mỗi bài học được cho, bạn phải phân tích danh sách các chuẩn đầu ra gốc trong mã hiệu (subitemKey). Đối với từng mục, đề xuất ĐÚNG CHÍNH XÁC 3 gợi ý chuẩn đầu ra thay thế, tuân thủ tuyệt đối quy định về từ/cụm động từ bắt đầu (tuyệt đối không được dùng bất cứ từ nào khác):
-1. Với tiểu mục có mã hiệu bắt đầu bằng "1.1" (Kiến thức): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các cụm động từ: "Hiểu được", "Trình bày được", "Giải thích được".
-2. Với tiểu mục có mã hiệu bắt đầu bằng "1.2" (Kiến thức): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng cụm động từ: "Phân tích được".
-3. Với tiểu mục có mã hiệu bắt đầu bằng "2.1" (Kỹ năng): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các cụm động từ: "Thực hiện được", "Hình thành được".
-4. Với tiểu mục có mã hiệu bắt đầu bằng "2.2" (Kỹ năng): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng cụm động từ: "Vận dụng được".
-5. Với tiểu mục có mã hiệu bắt đầu bằng "3.1" (Mức tự chủ và trách nhiệm): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các động từ: "Tuân thủ", "Chủ động", "Tích cực".
-6. Với tiểu mục có mã hiệu bắt đầu bằng "3.2" (Mức tự chủ và trách nhiệm): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các động từ: "Đấu tranh", "Thực hiện".
+1. Nhóm 1.x (Kiến thức): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các cụm động từ: "Phân tích được", "Giải thích được".
+2. Nhóm 2.x (Kỹ năng): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các cụm động từ: "Biết vận dụng", "Tiến hành được", "Nhận diện được", "Hình thành được".
+3. Nhóm 3.x (Mức tự chủ và trách nhiệm): Gợi ý đề xuất BẮT BUỘC phải bắt đầu bằng một trong các cụm từ/động từ: "Chủ động rèn luyện, phát triển", "Đấu tranh", "Phê phán", "Tuân thủ", "Phát huy".
 
 Nội dung viết lại sâu sắc, có tính chuyên môn học thuật quân sự và sư phạm, phản ánh đúng kiến thức thực tế trong tài liệu học tập chương bài học đó. Hành văn chuẩn xác, không viết lan man trùng lặp.
 
@@ -911,12 +905,9 @@ Yêu cầu cấu trúc xuất ra cực kỳ nghiêm ngặt:
 1. Phân bổ thành đúng 3 nhóm lớn: Kiến thức (category = "knowledge"), Kỹ năng (category = "skills"), Mức tự chủ và trách nhiệm (category = "autonomy").
 2. Mỗi nhóm phải có đúng KHÁC NHAU 2 tiểu mục mã số (Ví dụ: nhóm kiến thức có key 1.1 và 1.2, nhóm kỹ năng có key 2.1 và 2.2, nhóm tự chủ có key 3.1 và 3.2). Tổng cộng là 6 tiểu mục.
 3. Với MỖI tiểu mục, hãy đề xuất đúng CHÍNH XÁC 3 phương án gợi ý viết lại bắt đầu đúng bằng từ/cụm động từ bám sát mức độ Bloom sau đây (viết hoa chữ cái đầu tiên):
-   - Tiểu mục 1.1 (Kiến thức): Phương án gợi ý PHẢI bắt đầu bằng một trong các động từ: "Hiểu được", "Trình bày được", "Giải thích được".
-   - Tiểu mục 1.2 (Kiến thức): Phương án gợi ý PHẢI bắt đầu bằng động từ: "Phân tích được".
-   - Tiểu mục 2.1 (Kỹ năng): Phương án gợi ý PHẢI bắt đầu bằng một trong các động từ: "Thực hiện được", "Hình thành được".
-   - Tiểu mục 2.2 (Kỹ năng): Phương án gợi ý PHẢI bắt đầu bằng động từ: "Vận dụng được".
-   - Tiểu mục 3.1 (Mức tự chủ, trách nhiệm): Phương án gợi ý PHẢI bắt đầu bằng một trong các động từ: "Tuân thủ", "Chủ động", "Tích cực".
-   - Tiểu mục 3.2 (Mức tự chủ, trách nhiệm): Phương án gợi ý PHẢI bắt đầu bằng một trong các động từ: "Đấu tranh", "Thực hiện".
+   - Nhóm Kiến thức (1.1, 1.2): Phương án gợi ý PHẢI bắt đầu bằng một trong các động từ: "Phân tích được", "Giải thích được".
+   - Nhóm Kỹ năng (2.1, 2.2): Phương án gợi ý PHẢI bắt đầu bằng một trong các động từ: "Biết vận dụng", "Tiến hành được", "Nhận diện được", "Hình thành được".
+   - Nhóm Mức tự chủ, trách nhiệm (3.1, 3.2): Phương án gợi ý PHẢI bắt đầu bằng một trong các động từ: "Chủ động rèn luyện, phát triển", "Đấu tranh", "Phê phán", "Tuân thủ", "Phát huy".
 
 Đầu ra của bạn phải là một mảng gồm đúng 6 đối tượng JSON với cấu trúc:
 [
