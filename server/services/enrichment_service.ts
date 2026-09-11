@@ -1,4 +1,3 @@
-import { GoogleGenAI } from "@google/genai";
 import { BlockNode, OutlineNode, ParsedGtChapter, normalizeTextKey } from "../document_pipeline/parse_gt";
 import { Anchor } from "./anchor_locator";
 import { LessonDocumentModel, GeneratedInsertion } from "./normalizer";
@@ -13,6 +12,7 @@ import {
   buildMethodReviewerPrompt,
   PromptPackage
 } from "./prompt_builder";
+import { createOpenAICompatibleClient, OpenAICompatibleClient } from "./openai_compatible_client";
 
 export const ALLOWED_METHODS = [
   "Thao luan nhom",
@@ -127,42 +127,26 @@ export interface LessonEnrichmentResponse {
   source: string;
 }
 
-let aiClient: GoogleGenAI | null = null;
-function getAi(): GoogleGenAI | null {
+let aiClient: OpenAICompatibleClient | null = null;
+function getAi(): OpenAICompatibleClient | null {
   if (!aiClient) {
-    const key = process.env.GEMINI_API_KEY;
-    if (key) {
-      aiClient = new GoogleGenAI({
-        apiKey: key,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build"
-          }
-        }
-      });
+    try {
+      aiClient = createOpenAICompatibleClient();
+    } catch {
+      return null;
     }
   }
   return aiClient;
 }
 
-async function callGeminiJson<T>(promptPackage: PromptPackage): Promise<T | null> {
+async function callAiJson<T>(promptPackage: PromptPackage): Promise<T | null> {
   const ai = getAi();
   if (!ai) return null;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: promptPackage.user,
-      config: {
-        systemInstruction: promptPackage.system,
-        responseMimeType: "application/json"
-      }
-    });
-
-    const text = response.text || "";
-    return JSON.parse(text.trim()) as T;
+    return await ai.chatJson<T>(promptPackage.system, promptPackage.user);
   } catch (err) {
-    console.warn("Gemini generation failed or format is invalid. Error:", err);
+    console.warn("AI generation failed or format is invalid. Error:", err);
     return null;
   }
 }
@@ -738,7 +722,7 @@ async function planQuestionAnchors(
     excluded_ranges: lessonContext.excluded_range_labels
   });
 
-  const res = await callGeminiJson<PlannerPayload>(promptPackage);
+  const res = await callAiJson<PlannerPayload>(promptPackage);
   if (res && res.question_plan) {
     const planned: Anchor[] = [];
     let idx = 1;
@@ -759,7 +743,7 @@ async function planQuestionAnchors(
       idx++;
     }
     if (planned.length > 0) {
-      return [planned, "gemini"];
+      return [planned, "antigravity"];
     }
   }
 
@@ -810,10 +794,10 @@ async function generateQuestionPayloads(
   }
 
   const promptPackage = buildQuestionGeneratorPrompt({ prompt_items: promptItems });
-  const responseObj = await callGeminiJson<{ items: Array<{ anchor_id: string; questions: QuestionPayload[] }> }>(promptPackage);
+  const responseObj = await callAiJson<{ items: Array<{ anchor_id: string; questions: QuestionPayload[] }> }>(promptPackage);
 
   if (responseObj && responseObj.items) {
-    let source = "gemini";
+    let source = "antigravity";
     const reviewsMap: Record<string, Array<{ question_index: number; verdict: string; reason: string }>> = {};
 
     // Local Question Review Pass
@@ -827,7 +811,7 @@ async function generateQuestionPayloads(
     }
 
     const reviewPrompt = buildQuestionReviewerPrompt({ generated_questions_context: reviewContextLines.join("\n\n") });
-    const reviewRes = await callGeminiJson<{
+    const reviewRes = await callAiJson<{
       reviews: Array<{
         anchor_id: string;
         decisions: Array<{ question_index: number; verdict: string; reason: string }>;
@@ -835,7 +819,7 @@ async function generateQuestionPayloads(
     }>(reviewPrompt);
 
     if (reviewRes && reviewRes.reviews) {
-      source = "gemini+review";
+      source = "antigravity+review";
       for (const r of reviewRes.reviews) {
         reviewsMap[r.anchor_id] = r.decisions;
       }

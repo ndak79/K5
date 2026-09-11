@@ -8,8 +8,8 @@ export interface InheritedStyle {
   run_properties_xml: string | null;
 }
 
-function stripRunEmphasisAndSize(runProperties: any): void {
-  const tagsToStrip = ["w:b", "w:bCs", "w:i", "w:iCs", "w:sz", "w:szCs"];
+function stripRunEmphasis(runProperties: any): void {
+  const tagsToStrip = ["w:b", "w:bCs", "w:i", "w:iCs"];
   for (const tag of tagsToStrip) {
     const existing = runProperties.getElementsByTagName(tag)[0];
     if (existing) {
@@ -30,11 +30,11 @@ export function inheritStyle(anchorBlock: BlockNode | null): InheritedStyle {
   if (pPr) {
     const rPrInPPr = pPr.getElementsByTagName("w:rPr")[0];
     if (rPrInPPr) {
-      stripRunEmphasisAndSize(rPrInPPr);
+      stripRunEmphasis(rPrInPPr);
     }
   }
   if (rPr) {
-    stripRunEmphasisAndSize(rPr);
+    stripRunEmphasis(rPr);
   }
 
   const serializer = new XMLSerializer();
@@ -97,7 +97,7 @@ export function buildInsertedParagraphXml(
     rPr = doc.createElementNS(W_NAMESPACE, "w:rPr");
   }
 
-  stripRunEmphasisAndSize(rPr);
+  stripRunEmphasis(rPr);
 
   if (italic) {
     const i = doc.createElementNS(W_NAMESPACE, "w:i");
@@ -112,13 +112,6 @@ export function buildInsertedParagraphXml(
     rPr.appendChild(b);
     rPr.appendChild(bCs);
   }
-
-  const sz = doc.createElementNS(W_NAMESPACE, "w:sz");
-  sz.setAttributeNS(W_NAMESPACE, "w:val", "28");
-  const szCs = doc.createElementNS(W_NAMESPACE, "w:szCs");
-  szCs.setAttributeNS(W_NAMESPACE, "w:val", "28");
-  rPr.appendChild(sz);
-  rPr.appendChild(szCs);
 
   run.appendChild(rPr);
 

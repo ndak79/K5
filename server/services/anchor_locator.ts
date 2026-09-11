@@ -1,4 +1,4 @@
-import { BlockNode, OutlineNode, ParsedGtChapter } from "../document_pipeline/parse_gt";
+import { BlockNode, OutlineNode, ParsedGtChapter, isNumericSectionHeading } from "../document_pipeline/parse_gt";
 import { ParsedCdrLesson } from "../document_pipeline/parse_cdr";
 
 export interface Anchor {
@@ -14,7 +14,7 @@ export interface Anchor {
 
 function isHeadingBlock(block: BlockNode): boolean {
   const text = block.text_preview.trim();
-  return /^([IVXLC]+\.\s|[0-9]+\.\s|[a-z]\)\s)/i.test(text);
+  return isNumericSectionHeading(text) || /^([IVXLC]+\s*\.\s|[a-z]\)\s)/i.test(text);
 }
 
 function findBlockIndex(blocks: BlockNode[], blockId: string | null): number | null {
@@ -258,7 +258,10 @@ export function locateAnchors(
       });
     }
 
-    if (outlineNode.level === 1 || outlineNode.level === 2) {
+    if (
+      (outlineNode.level === 1 || outlineNode.level === 2) &&
+      isNumericSectionHeading(outlineNode.normalized_title)
+    ) {
       anchors.push({
         id: `${outlineNode.id}-method`,
         kind: "method",

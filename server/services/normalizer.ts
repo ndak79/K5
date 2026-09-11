@@ -1,4 +1,3 @@
-import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 import { BlockNode, OutlineNode, ParsedGtChapter, normalizeTextKey } from "../document_pipeline/parse_gt";
 import { ParsedCdrLesson } from "../document_pipeline/parse_cdr";
 import { locateAnchors, Anchor } from "./anchor_locator";
@@ -39,56 +38,6 @@ export function cloneBlocks(blocks: BlockNode[], source?: "cdr" | "gt" | "genera
     }
     return cloned;
   });
-}
-
-function toRoman(value: number): string {
-  const numerals: [number, string][] = [
-    [1000, "M"],
-    [900, "CM"],
-    [500, "D"],
-    [400, "CD"],
-    [100, "C"],
-    [90, "XC"],
-    [50, "L"],
-    [40, "XL"],
-    [10, "X"],
-    [9, "IX"],
-    [5, "V"],
-    [4, "IV"],
-    [1, "I"]
-  ];
-  let remaining = value;
-  const result: string[] = [];
-  for (const [amount, marker] of numerals) {
-    while (remaining >= amount) {
-      result.push(marker);
-      remaining -= amount;
-    }
-  }
-  return result.join("");
-}
-
-function extractHeadingDepth(title: string): [number, string] {
-  const stripped = title.trim();
-  const alphaMatch = stripped.match(/^([a-z])\)\s*(.+)$/i);
-  if (alphaMatch) {
-    return [3, alphaMatch[2].trim()];
-  }
-
-  const numberMatch = stripped.match(/^(\d+(?:\s*\.\s*\d+)*)\s*\.?\s*(.+)$/);
-  if (numberMatch) {
-    const segments = numberMatch[1].match(/\d+/g) || [];
-    const depth = segments.length;
-    const normalizedDepth = depth <= 2 ? 1 : 2;
-    return [normalizedDepth, numberMatch[2].trim()];
-  }
-
-  const romanMatch = stripped.match(/^([IVXLC]+)\s*\.?\s*(.+)$/i);
-  if (romanMatch) {
-    return [1, romanMatch[2].trim()];
-  }
-
-  return [2, stripped];
 }
 
 function collectExcludedRanges(blocks: BlockNode[]): ExcludedRange[] {
@@ -141,56 +90,6 @@ function collectExcludedRanges(blocks: BlockNode[]): ExcludedRange[] {
   return excludedRanges;
 }
 
-function rewriteBlockText(block: BlockNode, newText: string): BlockNode {
-  if (!block.xml) {
-    block.text_preview = newText;
-    return block;
-  }
-
-  const doc = new DOMParser().parseFromString(block.xml, "text/xml");
-  const textNodes = doc.getElementsByTagName("w:t");
-  if (textNodes.length === 0) {
-    block.text_preview = newText;
-    return block;
-  }
-
-  textNodes[0].textContent = newText;
-  for (let i = 1; i < textNodes.length; i++) {
-    textNodes[i].textContent = "";
-  }
-
-  block.text_preview = newText;
-  block.xml = new XMLSerializer().serializeToString(doc);
-  return block;
-}
-
-function normalizeOutlineTitles(outline: OutlineNode[]): OutlineNode[] {
-  let romanIndex = 0;
-  let numericIndex = 0;
-  const normalizedOutline: OutlineNode[] = [];
-
-  for (const node of outline) {
-    const [normalizedLevel, body] = extractHeadingDepth(node.original_title);
-    const updated = { ...node };
-    updated.level = normalizedLevel;
-
-    if (normalizedLevel === 1) {
-      romanIndex++;
-      numericIndex = 0;
-      updated.normalized_title = `${toRoman(romanIndex)}. ${body}`;
-    } else if (normalizedLevel === 2) {
-      numericIndex++;
-      updated.normalized_title = `${numericIndex}. ${body}`;
-    } else {
-      updated.normalized_title = node.original_title;
-    }
-
-    normalizedOutline.push(updated);
-  }
-
-  return normalizedOutline;
-}
-
 function normalizePartTwo(
   gtChapter: ParsedGtChapter
 ): [BlockNode[], OutlineNode[]] {
@@ -201,7 +100,7 @@ function normalizePartTwo(
     blockIdMap[gtChapter.blocks[i].id] = partTwoBlocks[i].id;
   }
 
-  const normalizedOutline = normalizeOutlineTitles(gtChapter.outline);
+  const normalizedOutline = gtChapter.outline.map((node) => ({ ...node }));
   for (const node of normalizedOutline) {
     if (node.block_id) {
       node.block_id = blockIdMap[node.block_id] || null;
@@ -212,13 +111,6 @@ function normalizePartTwo(
   for (const node of normalizedOutline) {
     if (node.block_id) {
       outlineByBlockId[node.block_id] = node;
-    }
-  }
-
-  for (const block of partTwoBlocks) {
-    const outlineNode = outlineByBlockId[block.id];
-    if (outlineNode) {
-      rewriteBlockText(block, outlineNode.normalized_title);
     }
   }
 

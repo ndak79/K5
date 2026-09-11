@@ -25,6 +25,18 @@ export interface ParsedGtDocument {
   chapters: ParsedGtChapter[];
 }
 
+const NUMERIC_SECTION_HEADING_PATTERN = /^\s*(\d+(?:\s*\.\s*\d+)+)\s*[.:]?\s+\S/;
+
+export function numericSectionDepth(text: string): number | null {
+  const match = text.match(NUMERIC_SECTION_HEADING_PATTERN);
+  if (!match) return null;
+  return match[1].split(".").length;
+}
+
+export function isNumericSectionHeading(text: string): boolean {
+  return numericSectionDepth(text) !== null;
+}
+
 const CHAPTER_HEADING_PATTERN = "^(Ch(?:ươ|uơ|uô|ươ|u)ng)\\s+\\d+";
 
 function extractChapterNumber(title: string): number {
@@ -67,11 +79,12 @@ function buildOutline(blocks: BlockNode[]): OutlineNode[] {
     }
 
     let level: number | null = null;
-    if (/^[IVXLC]+\b/i.test(text)) {
+    const numericDepth = numericSectionDepth(text);
+    if (numericDepth !== null) {
+      level = numericDepth <= 2 ? 1 : 2;
+    } else if (/^\s*[IVXLC]+\s*\.\s+\S/i.test(text)) {
       level = 1;
-    } else if (/^\d+(\.\d+)*\b/.test(text)) {
-      level = 2;
-    } else if (/^[a-z]\)/i.test(text)) {
+    } else if (/^\s*[a-z]\)\s+\S/i.test(text)) {
       level = 3;
     }
 

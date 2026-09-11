@@ -1,3 +1,6 @@
+import { config as loadEnv } from "dotenv";
+loadEnv({ path: ".env.local" });
+loadEnv();
 import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import multer from "multer";
@@ -35,9 +38,11 @@ import {
   rebuildSelectedCourseOutcomes
 } from "./server/services/bloom_service";
 import { serializeLessonPreview } from "./server/services/preview_serializer";
+import { DEFAULT_AI_MODEL } from "./server/services/openai_compatible_client";
 
 const app = express();
-const PORT = 3000;
+const configuredPort = Number.parseInt(process.env.PORT || "13826", 10);
+const PORT = Number.isFinite(configuredPort) ? configuredPort : 13826;
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(express.json());
@@ -55,10 +60,7 @@ app.get("/api/system/cliproxy/health", (req: Request, res: Response) => {
     success: true,
     data: {
       status: "ok",
-      models: [
-        "gemini-3.5-flash",
-        "gemini-3.1-pro-preview"
-      ]
+      models: [process.env.AI_MODEL || DEFAULT_AI_MODEL]
     }
   });
 });

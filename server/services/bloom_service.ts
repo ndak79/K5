@@ -3,12 +3,19 @@ import * as path from "path";
 import * as os from "os";
 import AdmZip from "adm-zip";
 import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
-import { GoogleGenAI, Type } from "@google/genai";
 import { SessionRuntime } from "./upload_session_service";
 import { normalizeInputDocument } from "../document_pipeline/convert";
 import { parseCdrDocument } from "../document_pipeline/parse_cdr";
 import { parseGtDocument, BlockNode } from "../document_pipeline/parse_gt";
 import { mapLessonsToChapters } from "./lesson_mapper";
+import { createOpenAICompatibleClient, DEFAULT_AI_MODEL, OpenAICompatibleClient } from "./openai_compatible_client";
+import { normalizeDocxPackageFonts } from "../document_pipeline/docx_font_normalizer";
+
+const AI_SCHEMA_TYPE = {
+  ARRAY: "ARRAY",
+  OBJECT: "OBJECT",
+  STRING: "STRING"
+} as const;
 
 export const bloomRuntime = new SessionRuntime();
 
@@ -308,25 +315,26 @@ const bloomState: BloomState = {
   error: null
 };
 
-function getAi(): GoogleGenAI | null {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return null;
-  return new GoogleGenAI({
-    apiKey: key,
-    httpOptions: {
-      headers: {
-        "User-Agent": "aistudio-build"
-      }
-    }
-  });
+function getAi(): OpenAICompatibleClient | null {
+  try {
+    return createOpenAICompatibleClient();
+  } catch {
+    return null;
+  }
 }
 
-async function generateContentWithRetry(ai: GoogleGenAI, args: any, maxAttempts = 6): Promise<any> {
+async function generateContentWithRetry(ai: OpenAICompatibleClient, args: any, maxAttempts = 6): Promise<any> {
   let attempt = 0;
   let delay = 4000; // start with 4 seconds for the first 429 retry
   while (true) {
     try {
-      return await ai.models.generateContent(args);
+      const responseType = String(args.config?.responseSchema?.type || "").toLowerCase().includes("array")
+        ? "none"
+        : "object";
+      const payload = await ai.chatJson<any>(args.config?.systemInstruction || "", args.contents || "", {
+        responseFormat: responseType
+      });
+      return { text: JSON.stringify(payload) };
     } catch (err: any) {
       attempt++;
       const errorMessage = err.message || String(err);
@@ -356,7 +364,7 @@ async function generateContentWithRetry(ai: GoogleGenAI, args: any, maxAttempts 
           } catch (_) {}
         }
         
-        console.warn(`[GEMINI RATE LIMIT] Gặp lỗi 429 (Mã lỗi: RESOURCE_EXHAUSTED - Thử lại lần ${attempt}/${maxAttempts}). Chờ ${customDelay / 1000}s...`);
+        console.warn(`[AI RATE LIMIT] Gặp lỗi 429 (Mã lỗi: RESOURCE_EXHAUSTED - Thử lại lần ${attempt}/${maxAttempts}). Chờ ${customDelay / 1000}s...`);
         await new Promise(resolve => setTimeout(resolve, customDelay));
         delay *= 1.5;
         continue;
@@ -562,7 +570,7 @@ export function resetBloomState(): BloomState {
 export async function suggestLessonOutcomes(lessonId: string, runtime: any): Promise<BloomSuggestionItem[]> {
   const ai = getAi();
   if (!ai) {
-    throw new Error("Không tìm thấy GEMINI_API_KEY trong cấu hình hệ thống.");
+    throw new Error("Không tìm thấy AI_API_KEY trong cấu hình hệ thống.");
   }
 
   const lessonsMap = runtime.lessons || {};
@@ -639,19 +647,19 @@ Không viết bất kỳ lời giải thích nào ngoài chuỗi JSON sạch.`;
 
   try {
     const response = await generateContentWithRetry(ai, {
-      model: "gemini-3.5-flash",
+      model: DEFAULT_AI_MODEL,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
-          type: Type.ARRAY,
+          type: AI_SCHEMA_TYPE.ARRAY,
           items: {
-            type: Type.OBJECT,
+            type: AI_SCHEMA_TYPE.OBJECT,
             properties: {
-              subitemKey: { type: Type.STRING },
+              subitemKey: { type: AI_SCHEMA_TYPE.STRING },
               suggestions: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
+                type: AI_SCHEMA_TYPE.ARRAY,
+                items: { type: AI_SCHEMA_TYPE.STRING },
                 description: "Danh sách 3 đề xuất chuẩn đầu ra viết lại bằng động từ thuộc phân nhóm"
               }
             },
@@ -694,7 +702,7 @@ Không viết bất kỳ lời giải thích nào ngoài chuỗi JSON sạch.`;
     return lessonItems;
   } catch (err: any) {
     console.error("Error generating lesson suggestions", err);
-    throw new Error(`Lỗi sinh gợi ý thông minh từ Gemini: ${err.message || err}`);
+    throw new Error(`Lỗi sinh gợi ý thông minh từ AI: ${err.message || err}`);
   }
 }
 
@@ -747,7 +755,7 @@ export async function suggestBulkLessonOutcomes(lessonIds: string[], runtime: an
 
   const ai = getAi();
   if (!ai) {
-    throw new Error("Không tìm thấy GEMINI_API_KEY trong cấu hình hệ thống.");
+    throw new Error("Không tìm thấy AI_API_KEY trong cấu hình hệ thống.");
   }
 
   // Split into batches of 5 to minimize risk of output truncation and utilize 80% fewer requests
@@ -787,28 +795,28 @@ HÃY TRẢ VỀ kết quả duy nhất dưới dạng cấu trúc JSON sạch, �
 
     try {
       const response = await generateContentWithRetry(ai, {
-        model: "gemini-3.5-flash",
+        model: DEFAULT_AI_MODEL,
         contents: prompt,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
-            type: Type.OBJECT,
+            type: AI_SCHEMA_TYPE.OBJECT,
             properties: {
               lessons: {
-                type: Type.ARRAY,
+                type: AI_SCHEMA_TYPE.ARRAY,
                 items: {
-                  type: Type.OBJECT,
+                  type: AI_SCHEMA_TYPE.OBJECT,
                   properties: {
-                    lessonId: { type: Type.STRING },
+                    lessonId: { type: AI_SCHEMA_TYPE.STRING },
                     subitems: {
-                      type: Type.ARRAY,
+                      type: AI_SCHEMA_TYPE.ARRAY,
                       items: {
-                        type: Type.OBJECT,
+                        type: AI_SCHEMA_TYPE.OBJECT,
                         properties: {
-                          subitemKey: { type: Type.STRING },
+                          subitemKey: { type: AI_SCHEMA_TYPE.STRING },
                           suggestions: {
-                            type: Type.ARRAY,
-                            items: { type: Type.STRING }
+                            type: AI_SCHEMA_TYPE.ARRAY,
+                            items: { type: AI_SCHEMA_TYPE.STRING }
                           }
                         },
                         required: ["subitemKey", "suggestions"]
@@ -871,7 +879,7 @@ HÃY TRẢ VỀ kết quả duy nhất dưới dạng cấu trúc JSON sạch, �
 export async function suggestCourseOutcomes(runtime: any): Promise<BloomSuggestionItem[]> {
   const ai = getAi();
   if (!ai) {
-    throw new Error("Không tìm thấy GEMINI_API_KEY trong cấu hình hệ thống.");
+    throw new Error("Không tìm thấy AI_API_KEY trong cấu hình hệ thống.");
   }
 
   const parsedCdr = runtime.parsed_cdr;
@@ -927,20 +935,20 @@ Không viết bất kỳ lời giải thích nào khác ngoài chuỗi JSON sạ
 
   try {
     const response = await generateContentWithRetry(ai, {
-      model: "gemini-3.5-flash",
+      model: DEFAULT_AI_MODEL,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
-          type: Type.ARRAY,
+          type: AI_SCHEMA_TYPE.ARRAY,
           items: {
-            type: Type.OBJECT,
+            type: AI_SCHEMA_TYPE.OBJECT,
             properties: {
-              subitemKey: { type: Type.STRING },
-              category: { type: Type.STRING },
+              subitemKey: { type: AI_SCHEMA_TYPE.STRING },
+              category: { type: AI_SCHEMA_TYPE.STRING },
               suggestions: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
+                type: AI_SCHEMA_TYPE.ARRAY,
+                items: { type: AI_SCHEMA_TYPE.STRING },
                 description: "Danh sách 3 đề xuất chuẩn đầu ra của môn học viết lại bằng động từ thuộc phân nhóm quy định"
               }
             },
@@ -992,7 +1000,7 @@ Không viết bất kỳ lời giải thích nào khác ngoài chuỗi JSON sạ
     return courseItems;
   } catch (err: any) {
     console.error("Error synthesizing course outcomes", err);
-    throw new Error(`Lỗi sinh chuẩn đầu ra môn học từ Gemini: ${err.message || err}`);
+    throw new Error(`Lỗi sinh chuẩn đầu ra môn học từ AI: ${err.message || err}`);
   }
 }
 
@@ -1333,6 +1341,7 @@ export function compileOptimizedDocx(runtime: any, outputPath: string): string {
   // Re-serialize modified DOM to XML string
   const docXmlString = new XMLSerializer().serializeToString(doc);
   zip.addFile("word/document.xml", Buffer.from(docXmlString, "utf-8"));
+  normalizeDocxPackageFonts(zip);
 
   const parentDir = path.dirname(outputPath);
   if (!fs.existsSync(parentDir)) {

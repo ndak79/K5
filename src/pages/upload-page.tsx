@@ -186,7 +186,7 @@ export function UploadPage() {
         <div className="bg-[#4B5E40] rounded-[32px] p-8 md:p-10 text-white relative overflow-hidden flex flex-col justify-between shadow-xl min-h-[220px]">
           <div className="relative z-10 w-full">
             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
-              <h3 className="text-2xl md:text-3xl font-serif mt-2 leading-snug">Chuẩn hóa cấu trúc khung bài giảng kỹ thuật số</h3>
+              <h3 className="text-2xl md:text-3xl font-serif mt-2 leading-snug">Chuẩn hóa bài giảng các môn KHXH&NV</h3>
               <div className="flex items-center gap-3 bg-white/10 px-4 py-2 rounded-2xl border border-white/10 backdrop-blur-xs flex-shrink-0 self-start sm:self-auto">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-white">
                   <span className={`w-2 h-2 rounded-full ${backendStatus === "ready" ? "bg-[#A3E635]" : "bg-red-400 animate-pulse"}`}></span>

@@ -1,16 +1,38 @@
 import { BlockNode } from "../document_pipeline/ooxml_range_extractor";
 import { GeneratedInsertion, LessonDocumentModel } from "./normalizer";
 import { buildInsertedParagraphXml, inheritStyle } from "./style_inheritance";
+import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 
-function buildContentTitleText(lesson: LessonDocumentModel): string {
-  const totalMinutes = lesson.cdr_lesson.schedule_items.reduce(
-    (sum, item) => sum + (item.duration_minutes || 0),
-    0
-  );
-  if (totalMinutes > 0) {
-    return `NỘI DUNG (${totalMinutes} phút)`;
-  }
+function buildContentTitleText(): string {
   return "NỘI DUNG";
+}
+
+function uppercaseTextBlock(block: BlockNode): BlockNode {
+  if (!block.xml) {
+    return { ...block, text_preview: block.text_preview.toLocaleUpperCase("vi-VN") };
+  }
+
+  const doc = new DOMParser().parseFromString(block.xml, "text/xml");
+  const textNodes = doc.getElementsByTagName("w:t");
+  for (let index = 0; index < textNodes.length; index++) {
+    const textNode = textNodes[index];
+    textNode.textContent = (textNode.textContent || "").toLocaleUpperCase("vi-VN");
+  }
+
+  return {
+    ...block,
+    text_preview: block.text_preview.toLocaleUpperCase("vi-VN"),
+    xml: new XMLSerializer().serializeToString(doc.documentElement)
+  };
+}
+
+function uppercaseLessonTitle(blocks: BlockNode[]): BlockNode[] {
+  const titleIndex = blocks.findIndex(
+    (block) => block.kind === "paragraph" && block.text_preview.trim().length > 0
+  );
+  if (titleIndex === -1) return blocks;
+
+  return blocks.map((block, index) => (index === titleIndex ? uppercaseTextBlock(block) : block));
 }
 
 export function buildContentTitleBlock(
@@ -19,7 +41,7 @@ export function buildContentTitleBlock(
   orderIndex: number
 ): BlockNode {
   const style = inheritStyle(referenceBlock);
-  const titleText = buildContentTitleText(lesson);
+  const titleText = buildContentTitleText();
 
   return {
     id: "generated-content-title",
@@ -80,7 +102,9 @@ export function composeDocumentBlocks(
     }
   }
 
-  const partOneBlocks = trimBoundaryBlanks(lesson.part_one_blocks, { trimEnd: true });
+  const partOneBlocks = uppercaseLessonTitle(
+    trimBoundaryBlanks(lesson.part_one_blocks, { trimEnd: true })
+  );
   const partTwoBlocks = trimBoundaryBlanks(lesson.part_two_blocks, { trimStart: true });
 
   const result: BlockNode[] = [...partOneBlocks];
