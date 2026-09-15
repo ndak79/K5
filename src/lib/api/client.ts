@@ -310,3 +310,171 @@ export async function exportBloomCdrBlob(): Promise<Blob> {
   return response.blob();
 }
 
+// --- EXAM ANSWERS FRONTEND INTERFACE ---
+
+export interface ExamAnswerSubItem {
+  content: string;
+  score: string;
+}
+
+export interface ExamAnswerModel {
+  questionNumber: number;
+  questionText: string;
+  totalScore: string;
+  introduction: {
+    title: string;
+    score: string;
+  };
+  part1: {
+    title: string;
+    score: string;
+    items: ExamAnswerSubItem[];
+  };
+  part2: {
+    title: string;
+    score: string;
+    items: ExamAnswerSubItem[];
+  };
+  conclusion: {
+    title: string;
+    score: string;
+  };
+  clos?: string[];
+  levels?: {
+    easy: string;
+    medium: string;
+    hard: string;
+  };
+}
+
+export interface ExamQuestionItem {
+  number: number;
+  question: string;
+  status: "idle" | "generating" | "completed" | "failed";
+  error: string | null;
+  answer: ExamAnswerModel | null;
+}
+
+export interface CloDefinition {
+  code: string;
+  text: string;
+}
+
+export interface ExamAnswerSessionSummary {
+  session_id: string;
+  cdr_file_name: string | null;
+  gt_file_name: string | null;
+  questions_file_name: string | null;
+  cdr_status: "missing" | "ready" | "failed";
+  gt_status: "missing" | "ready" | "failed";
+  questions_status: "missing" | "ready" | "failed";
+  cdr_error: string | null;
+  gt_error: string | null;
+  questions_error: string | null;
+  total_questions: number;
+  completed_questions: number;
+  clos: CloDefinition[];
+  questions: ExamQuestionItem[];
+}
+
+export async function fetchExamAnswersSession(): Promise<ExamAnswerSessionSummary> {
+  const payload = await parseJson<{ success: boolean; session: ExamAnswerSessionSummary }>(
+    await fetch(`${API_BASE_URL}/api/exam-answers/session`)
+  );
+  return payload.session;
+}
+
+export async function uploadExamAnswersCdr(file: File): Promise<ExamAnswerSessionSummary> {
+  const formData = new FormData();
+  formData.append("cdr_file", file);
+  const response = await fetch(`${API_BASE_URL}/api/exam-answers/upload/cdr`, {
+    method: "POST",
+    body: formData
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi tải file CDR: HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  return payload.session;
+}
+
+export async function uploadExamAnswersGt(file: File): Promise<ExamAnswerSessionSummary> {
+  const formData = new FormData();
+  formData.append("gt_file", file);
+  const response = await fetch(`${API_BASE_URL}/api/exam-answers/upload/gt`, {
+    method: "POST",
+    body: formData
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi tải file Giáo trình: HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  return payload.session;
+}
+
+export async function uploadExamAnswersQuestions(file: File): Promise<ExamAnswerSessionSummary> {
+  const formData = new FormData();
+  formData.append("questions_file", file);
+  const response = await fetch(`${API_BASE_URL}/api/exam-answers/upload/questions`, {
+    method: "POST",
+    body: formData
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || `Lỗi tải file Câu hỏi: HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  return payload.session;
+}
+
+export async function generateExamAnswer(questionNumber: number): Promise<{ success: boolean; data: ExamAnswerModel; session: ExamAnswerSessionSummary }> {
+  const payload = await parseJson<{ success: boolean; data: ExamAnswerModel; session: ExamAnswerSessionSummary }>(
+    await fetch(`${API_BASE_URL}/api/exam-answers/questions/${questionNumber}/suggest`, {
+      method: "POST"
+    })
+  );
+  return payload;
+}
+
+export async function generateBulkExamAnswers(questionNumbers: number[]): Promise<ExamAnswerSessionSummary> {
+  const payload = await parseJson<{ success: boolean; session: ExamAnswerSessionSummary }>(
+    await fetch(`${API_BASE_URL}/api/exam-answers/questions/suggest-bulk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ questionNumbers })
+    })
+  );
+  return payload.session;
+}
+
+export async function updateExamAnswer(questionNumber: number, answer: ExamAnswerModel): Promise<ExamAnswerSessionSummary> {
+  const payload = await parseJson<{ success: boolean; session: ExamAnswerSessionSummary }>(
+    await fetch(`${API_BASE_URL}/api/exam-answers/questions/${questionNumber}/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answer })
+    })
+  );
+  return payload.session;
+}
+
+export async function resetExamAnswersSession(): Promise<ExamAnswerSessionSummary> {
+  const payload = await parseJson<{ success: boolean; session: ExamAnswerSessionSummary }>(
+    await fetch(`${API_BASE_URL}/api/exam-answers/reset`, {
+      method: "POST"
+    })
+  );
+  return payload.session;
+}
+
+export async function exportExamAnswersDocxBlob(): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}/api/exam-answers/export`, {
+    method: "POST"
+  });
+  if (!response.ok) {
+    throw new Error(`Xuất file Đáp án lỗi: HTTP ${response.status}`);
+  }
+  return response.blob();
+}

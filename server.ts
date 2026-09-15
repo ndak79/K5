@@ -37,6 +37,17 @@ import {
   rebuildSelectedOutcomes,
   rebuildSelectedCourseOutcomes
 } from "./server/services/bloom_service";
+import {
+  getExamAnswerSummary,
+  uploadExamAnswersCdr,
+  uploadExamAnswersGt,
+  uploadExamAnswersQuestions,
+  generateAnswerForQuestion,
+  generateBulkExamAnswers,
+  updateQuestionAnswer,
+  resetExamAnswerRuntime,
+  compileExamAnswersDocx
+} from "./server/services/exam_answer_service";
 import { serializeLessonPreview } from "./server/services/preview_serializer";
 import { DEFAULT_AI_MODEL } from "./server/services/openai_compatible_client";
 
@@ -333,6 +344,111 @@ app.post("/api/bloom/export", (req: Request, res: Response) => {
     });
   } catch (err: any) {
     res.status(450).json({ error: err.message || "Xử lý tạo tài liệu tối ưu thất bại." });
+  }
+});
+
+// --- EXAM ANSWERS GENERATOR API ENDPOINTS ---
+
+// GET current exam answers session summary
+app.get("/api/exam-answers/session", (req: Request, res: Response) => {
+  res.json({ success: true, session: getExamAnswerSummary() });
+});
+
+// POST upload CDR file for exam answers
+app.post("/api/exam-answers/upload/cdr", upload.single("cdr_file"), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: "Yêu cầu file đính kèm cdr_file" });
+    }
+    const summary = await uploadExamAnswersCdr(req.file.originalname, req.file.buffer);
+    res.json({ success: true, session: summary });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message || "Xử lý file CDR thất bại" });
+  }
+});
+
+// POST upload GT file for exam answers
+app.post("/api/exam-answers/upload/gt", upload.single("gt_file"), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: "Yêu cầu file đính kèm gt_file" });
+    }
+    const summary = await uploadExamAnswersGt(req.file.originalname, req.file.buffer);
+    res.json({ success: true, session: summary });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message || "Xử lý file giáo trình thất bại" });
+  }
+});
+
+// POST upload Questions file for exam answers
+app.post("/api/exam-answers/upload/questions", upload.single("questions_file"), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: "Yêu cầu file đính kèm questions_file" });
+    }
+    const summary = await uploadExamAnswersQuestions(req.file.originalname, req.file.buffer);
+    res.json({ success: true, session: summary });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message || "Xử lý file câu hỏi thất bại" });
+  }
+});
+
+// POST suggest answer for specific question
+app.post("/api/exam-answers/questions/:questionNumber/suggest", async (req: Request, res: Response) => {
+  try {
+    const questionNumber = Number.parseInt(req.params.questionNumber, 10);
+    const answer = await generateAnswerForQuestion(questionNumber);
+    res.json({ success: true, data: answer, session: getExamAnswerSummary() });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message || "Lỗi sinh đáp án cho câu hỏi" });
+  }
+});
+
+// POST bulk suggest answers for multiple questions
+app.post("/api/exam-answers/questions/suggest-bulk", async (req: Request, res: Response) => {
+  try {
+    const { questionNumbers } = req.body;
+    if (!Array.isArray(questionNumbers)) {
+      return res.status(400).json({ success: false, error: "questionNumbers phải là một mảng số nguyên" });
+    }
+    const summary = await generateBulkExamAnswers(questionNumbers);
+    res.json({ success: true, session: summary });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message || "Lỗi sinh đáp án hàng loạt" });
+  }
+});
+
+// POST update answer for question
+app.post("/api/exam-answers/questions/:questionNumber/update", (req: Request, res: Response) => {
+  const questionNumber = Number.parseInt(req.params.questionNumber, 10);
+  const { answer } = req.body;
+  if (!answer) {
+    return res.status(400).json({ success: false, error: "Yêu cầu dữ liệu answer" });
+  }
+  const summary = updateQuestionAnswer(questionNumber, answer);
+  res.json({ success: true, session: summary });
+});
+
+// POST reset exam answers session
+app.post("/api/exam-answers/reset", (req: Request, res: Response) => {
+  resetExamAnswerRuntime();
+  res.json({ success: true, session: getExamAnswerSummary() });
+});
+
+// POST compile and export exam answers docx
+app.post("/api/exam-answers/export", (req: Request, res: Response) => {
+  try {
+    const tempFile = path.join(os.tmpdir(), `dap_an_cau_hoi_${Date.now()}.docx`);
+    compileExamAnswersDocx(tempFile);
+    res.download(tempFile, "Dap_An_Va_Thang_Diem_Cau_Hoi.docx", (err) => {
+      try {
+        if (path.resolve(tempFile).startsWith(os.tmpdir())) {
+          path.resolve(tempFile) && fs.existsSync(tempFile) && fs.unlinkSync(tempFile);
+        }
+      } catch {}
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message || "Xuất file đáp án thất bại" });
   }
 });
 

@@ -17,6 +17,7 @@ export function Layout({
   const location = useLocation();
   const isHome = location.pathname === "/";
   const isBloomOptimize = location.pathname === "/bloom-optimize";
+  const isExamAnswers = location.pathname === "/exam-answers";
 
   return (
     <div className="min-h-screen bg-paper text-ink font-sans antialiased flex flex-col">
@@ -66,6 +67,18 @@ export function Layout({
                   <span className="material-symbols-outlined text-[18px]">rule_folder</span>
                   <span>Tối ưu Bloom CDR</span>
                 </Link>
+
+                <Link
+                  to="/exam-answers"
+                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-sm font-medium transition-colors ${
+                    isExamAnswers
+                      ? "bg-sage-hover text-accent shadow-xs"
+                      : "text-ink/80 hover:bg-sage-hover/50 hover:text-accent"
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[18px]">quiz</span>
+                  <span>Tạo đáp án</span>
+                </Link>
               </div>
             </div>
 
@@ -101,6 +114,15 @@ export function Layout({
                 title="Tối ưu Bloom CDR"
               >
                 <span className="material-symbols-outlined text-lg leading-none">rule_folder</span>
+              </Link>
+              <Link
+                to="/exam-answers"
+                className={`p-2 rounded-xl flex items-center justify-center transition-all ${
+                  isExamAnswers ? "text-accent bg-accent/10" : "text-ink/75 hover:bg-sage-hover"
+                }`}
+                title="Tạo đáp án"
+              >
+                <span className="material-symbols-outlined text-lg leading-none">quiz</span>
               </Link>
             </div>
           </div>
