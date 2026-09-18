@@ -354,20 +354,29 @@ function getAiClient(): OpenAICompatibleClient | null {
   }
 }
 
-export function extractQuestionSubject(questionText: string): string {
+export function extractQuestionParts(questionText: string): { subject: string; application: string } {
   let s = questionText.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
-  s = s.replace(/^(?:Phân tích|Nêu|Trình bày|Làm rõ|Giải thích)\s+/i, "");
-  s = s.replace(/[.;]\s*(?:Ý nghĩa vận dụng|Vận dụng).*$/i, "");
-  return s.trim();
+  const match = s.match(/^(?:Phân tích|Nêu|Trình bày|Làm rõ|Giải thích)\s+(.+?)(?:[.;]\s*(Ý nghĩa vận dụng.*|Vận dụng.*))?$/i);
+  let subject = s;
+  let application = "Ý nghĩa vận dụng đối với người cán bộ phân đội để nâng cao hiệu quả công tác ở đơn vị hiện nay.";
+  if (match) {
+    subject = match[1].trim();
+    if (match[2]) application = match[2].trim();
+  }
+  return { subject, application };
+}
+
+export function extractQuestionSubject(questionText: string): string {
+  return extractQuestionParts(questionText).subject;
 }
 
 export function buildFallbackLevels(questionText: string): { easy: string; medium: string; hard: string } {
-  const subject = extractQuestionSubject(questionText);
-  const normalizedSubject = subject ? subject.charAt(0).toLowerCase() + subject.slice(1) : "nội dung câu hỏi";
+  const { subject, application } = extractQuestionParts(questionText);
+  const cleanApp = application.endsWith(".") ? application : application + ".";
   return {
-    easy: `Nêu ${normalizedSubject} và làm rõ các khái niệm cơ bản liên quan.`,
-    medium: `Trình bày nội dung ${normalizedSubject}. Rút ra các yêu cầu vận dụng đối với người cán bộ phân đội ở đơn vị hiện nay.`,
-    hard: `Phân tích tính biện chứng trong ${normalizedSubject}. Từ đó luận giải các biện pháp của người cán bộ phân đội nhằm nâng cao hiệu quả công tác ở đơn vị hiện nay.`
+    easy: `Nêu ${subject}.`,
+    medium: `Trình bày ${subject}. Rút ra ý nghĩa đối với bản thân.`,
+    hard: `Phân tích ${subject}. ${cleanApp}`
   };
 }
 
@@ -481,17 +490,14 @@ ${cloListStr}
    - Tổng điểm toàn bài: đúng "5,0đ" (0,25đ + 2,5đ + 2,0đ + 0,25đ = 5,0đ).
 2. Dung lượng đáp án: Vừa đủ, sâu sắc, không quá ngắn và không quá dài (độ dài toàn bộ nội dung đáp án đạt khoảng 2500 đến 3200 ký tự, tương đương khoảng 600 đến 800 từ tiếng Việt), văn phong sư phạm quân sự chuẩn mực.
 3. Ánh xạ CLO: Lựa chọn các mã CLO phù hợp nhất từ danh mục CLO ở trên (mảng clos chứa các mã như ["1.1", "1.2", "2.2", "3.1", "3.2"]).
-4. Các câu hỏi ở 3 mức độ (levels) - BẮT BUỘC phân hóa rõ ràng theo chuẩn nhận thức Bloom, không dùng trùng lặp động từ và đúng bản chất khảo thí:
-   - easy: Mức Dễ (Cấp độ Nhận biết - Tái hiện kiến thức):
-     * Yêu cầu nêu/liệt kê tên các đặc trưng, nội dung, quy luật hoặc nguyên tắc và làm rõ định nghĩa/khái niệm cơ bản liên quan.
-     * TUYỆT ĐỐI KHÔNG dùng từ "Phân tích", không yêu cầu vận dụng thực tế phức tạp.
-     * Bắt đầu bằng: "Nêu..." hoặc "Liệt kê... và làm rõ khái niệm...".
-   - medium: Mức Trung bình (Cấp độ Thông hiểu - Vận dụng cơ bản):
-     * Yêu cầu trình bày, làm rõ nội dung bản chất của vấn đề và rút ra các yêu cầu/ý nghĩa vận dụng đối với người cán bộ phân đội.
-     * Bắt đầu bằng: "Trình bày nội dung... Rút ra các yêu cầu vận dụng đối với người cán bộ phân đội ở đơn vị hiện nay."
-   - hard: Mức Khó (Cấp độ Phân tích sâu - Vận dụng sáng tạo / Xử lý thực tiễn):
-     * Yêu cầu phân tích sâu sắc cơ sở lý luận, tính quy luật, tính biện chứng và luận giải các biện pháp sư phạm, cách thức tiến hành của người cán bộ phân đội nhằm nâng cao hiệu quả công tác ở đơn vị.
-     * Bắt đầu bằng: "Phân tích toàn diện/tính biện chứng... Từ đó luận giải các biện pháp của người cán bộ phân đội nhằm nâng cao hiệu quả công tác ở đơn vị hiện nay."
+4. Các câu hỏi ở 3 mức độ (levels) - BẮT BUỘC tuân thủ đúng cấu trúc phân hóa sau:
+   - easy: Mức Dễ: CHỈ gồm 1 ý "Nêu" ngắn gọn (Nhận biết - Tái hiện kiến thức).
+     * Tuyệt đối KHÔNG dùng từ "Phân tích", KHÔNG có vế thứ hai hay yêu cầu vận dụng.
+     * Mẫu chuẩn: "Nêu [nội dung/quy luật/nguyên tắc/đặc trưng/bản chất]."
+   - medium: Mức Trung bình (Thông hiểu & Rút ra ý nghĩa bản thân):
+     * Cấu trúc chuẩn: "Trình bày [nội dung lý luận]. Rút ra ý nghĩa đối với bản thân."
+   - hard: Mức Khó (Phân tích sâu & Vận dụng đối với người cán bộ phân đội):
+     * Cấu trúc chuẩn: "Phân tích [nội dung lý luận]. Ý nghĩa vận dụng đối với người cán bộ phân đội [để nâng cao hiệu quả công tác/huấn luyện/giáo dục ở đơn vị hiện nay]."
 
 Đầu ra BẮT BUỘC là đối tượng JSON sạch với cấu trúc:
 {
@@ -561,17 +567,31 @@ Không kèm theo bất kỳ văn bản giải thích nào ngoài chuỗi JSON.`;
     if (!answerModel.levels || !answerModel.levels.easy || !answerModel.levels.medium || !answerModel.levels.hard) {
       answerModel.levels = buildFallbackLevels(qItem.question);
     } else {
-      // Ensure easy level strictly adheres to Bloom remembering (never start with Phân tích)
-      if (answerModel.levels.easy.toLowerCase().startsWith("phân tích")) {
-        answerModel.levels.easy = answerModel.levels.easy.replace(/^phân tích\s+/i, "Nêu ");
+      const parts = extractQuestionParts(qItem.question);
+
+      // 1. Easy: only 1 idea starting with "Nêu..."
+      if (!answerModel.levels.easy.toLowerCase().startsWith("nêu")) {
+        answerModel.levels.easy = `Nêu ${answerModel.levels.easy.replace(/^(?:Phân tích|Trình bày|Làm rõ|Giải thích)\s+/i, "")}`;
       }
-      // Ensure medium level starts with Trình bày
-      if (!answerModel.levels.medium.toLowerCase().startsWith("trình bày")) {
+      answerModel.levels.easy = answerModel.levels.easy.replace(/[.;]\s*(?:Phân tích|Ý nghĩa|Rút ra|Vận dụng).*$/i, "").trim();
+      if (!answerModel.levels.easy.endsWith(".")) {
+        answerModel.levels.easy += ".";
+      }
+
+      // 2. Medium: "Trình bày... Rút ra ý nghĩa đối với bản thân."
+      if (!answerModel.levels.medium.includes("Rút ra ý nghĩa đối với bản thân")) {
+        answerModel.levels.medium = `Trình bày ${parts.subject}. Rút ra ý nghĩa đối với bản thân.`;
+      } else if (!answerModel.levels.medium.toLowerCase().startsWith("trình bày")) {
         answerModel.levels.medium = `Trình bày ${answerModel.levels.medium.replace(/^(?:Nêu|Phân tích)\s+/i, "")}`;
       }
-      // Ensure hard level starts with Phân tích
+
+      // 3. Hard: "Phân tích... Ý nghĩa vận dụng đối với người cán bộ phân đội..."
       if (!answerModel.levels.hard.toLowerCase().startsWith("phân tích")) {
         answerModel.levels.hard = `Phân tích ${answerModel.levels.hard.replace(/^(?:Nêu|Trình bày)\s+/i, "")}`;
+      }
+      if (!answerModel.levels.hard.includes("Ý nghĩa vận dụng đối với người cán bộ")) {
+        const cleanApp = parts.application.endsWith(".") ? parts.application : parts.application + ".";
+        answerModel.levels.hard = `Phân tích ${parts.subject}. ${cleanApp}`;
       }
     }
 

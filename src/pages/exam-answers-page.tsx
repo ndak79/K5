@@ -777,7 +777,7 @@ export function ExamAnswersPage() {
                   <h5 className="font-bold text-accent font-serif">Đề xuất 3 mức độ câu hỏi (Dễ, Trung bình, Khó):</h5>
                   <div className="space-y-2">
                     <div>
-                      <label className="block text-[11px] font-bold text-ink/70 mb-1">1. Mức Dễ (Nhận biết - Tái hiện):</label>
+                      <label className="block text-[11px] font-bold text-ink/70 mb-1">1. Mức Dễ (1 ý "Nêu"):</label>
                       <textarea
                         rows={2}
                         value={editingAnswer.levels?.easy || ""}
@@ -792,11 +792,11 @@ export function ExamAnswersPage() {
                           })
                         }
                         className="w-full p-2 bg-white border border-sage-border rounded-lg text-ink"
-                        placeholder="Nêu... và làm rõ khái niệm..."
+                        placeholder="Nêu [nội dung/vấn đề]..."
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-bold text-ink/70 mb-1">2. Mức Trung bình (Thông hiểu & Vận dụng cơ bản):</label>
+                      <label className="block text-[11px] font-bold text-ink/70 mb-1">2. Mức Trung bình (Trình bày... Rút ra ý nghĩa đối với bản thân...):</label>
                       <textarea
                         rows={2}
                         value={editingAnswer.levels?.medium || ""}
@@ -815,7 +815,7 @@ export function ExamAnswersPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-bold text-ink/70 mb-1">3. Mức Khó (Phân tích sâu & Vận dụng sáng tạo):</label>
+                      <label className="block text-[11px] font-bold text-ink/70 mb-1">3. Mức Khó (Phân tích... Ý nghĩa vận dụng đối với người cán bộ phân đội...):</label>
                       <textarea
                         rows={2}
                         value={editingAnswer.levels?.hard || ""}
@@ -830,7 +830,7 @@ export function ExamAnswersPage() {
                           })
                         }
                         className="w-full p-2 bg-white border border-sage-border rounded-lg text-ink"
-                        placeholder="Phân tích toàn diện/tính biện chứng... Từ đó luận giải các biện pháp..."
+                        placeholder="Phân tích... Ý nghĩa vận dụng đối với người cán bộ phân đội..."
                       />
                     </div>
                   </div>
