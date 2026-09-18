@@ -8,6 +8,6 @@ test("contains the requested AI defaults and UI label", () => {
 
   assert.match(clientSource, /http:\/\/localhost:20128\/v1/);
   assert.match(clientSource, /ag\/gemini-3\.6-flash-medium/);
-  assert.equal((pageSource.match(/Chuẩn hóa bài giảng các môn KHXH&NV/g) || []).length, 1);
+  assert.equal((pageSource.match(/Ứng dụng AI trong xây dựng CĐR, bài giảng, ngân hàng câu hỏi, đáp án các môn KHXH&NV/g) || []).length, 1);
   assert.equal((pageSource.match(/Chuẩn hóa cấu trúc khung bài giảng kỹ thuật số/g) || []).length, 0);
 });
