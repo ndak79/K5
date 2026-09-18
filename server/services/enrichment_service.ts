@@ -398,30 +398,30 @@ function buildQuestionFromSentence(sentence: string, title: string): string | nu
   const actionMatch =
     stripped.match(/(.{3,140}?)\s+được\s+thực hiện\s+/i) || stripped.match(/(.{3,140}?)\s+duoc\s+thuc hien\s+/i);
 
-  if (roleMatch) return `${resolveQuestionSubject(roleMatch[1], title)} giữ vai trò gì?`;
-  if (purposeMatch) return `Mục đích chính của ${resolveQuestionSubject(purposeMatch[1], title)} là gì?`;
-  if (centralMatch) return `${resolveQuestionSubject(centralMatch[1], title)} là gì?`;
-  if (definitionMatch) return `${resolveQuestionSubject(definitionMatch[1], title)} là gì?`;
-  if (includesMatch) return `${resolveQuestionSubject(includesMatch[1], title)} bao gồm những nội dung nào?`;
-  if (clarifyMatch) return `${resolveQuestionSubject(clarifyMatch[1], title)} chỉ rõ yêu cầu gì?`;
-  if (requireMatch) return `${resolveQuestionSubject(requireMatch[1], title)} đòi hỏi điều gì?`;
-  if (reflectMatch) return `${resolveQuestionSubject(reflectMatch[1], title)} phản ánh nội dung gì?`;
-  if (relationMatch) return `${resolveQuestionSubject(relationMatch[1], title)} có mối quan hệ như thế nào với các nhân tố khác?`;
-  if (processMatch) return `${resolveQuestionSubject(processMatch[1], title)} được tiến hành như thế nào?`;
-  if (actionMatch) return `${resolveQuestionSubject(actionMatch[1], title)} được thực hiện như thế nào?`;
+  if (roleMatch) return `Theo các đồng chí, ${resolveQuestionSubject(roleMatch[1], title)} giữ vai trò gì trong hoạt động quân sự?`;
+  if (purposeMatch) return `Theo các đồng chí, mục đích cốt lõi của ${resolveQuestionSubject(purposeMatch[1], title)} hướng tới điều gì?`;
+  if (centralMatch) return `Theo các đồng chí, bản chất cốt lõi của ${resolveQuestionSubject(centralMatch[1], title)} thể hiện ở những đặc trưng nào?`;
+  if (definitionMatch) return `Theo các đồng chí, bản chất cốt lõi của ${resolveQuestionSubject(definitionMatch[1], title)} thể hiện ở những đặc trưng nào?`;
+  if (includesMatch) return `Theo các đồng chí, ${resolveQuestionSubject(includesMatch[1], title)} bao gồm những nội dung, bộ phận cấu thành nào?`;
+  if (clarifyMatch) return `Từ nội dung trên, ${resolveQuestionSubject(clarifyMatch[1], title)} chỉ rõ những yêu cầu sư phạm gì đối với người học?`;
+  if (requireMatch) return `Theo các đồng chí, ${resolveQuestionSubject(requireMatch[1], title)} đòi hỏi người cán bộ cần lưu ý những yêu cầu gì?`;
+  if (reflectMatch) return `Theo các đồng chí, ${resolveQuestionSubject(reflectMatch[1], title)} phản ánh những nội dung bản chất nào?`;
+  if (relationMatch) return `Theo các đồng chí, ${resolveQuestionSubject(relationMatch[1], title)} có mối quan hệ tác động qua lại như thế nào với các nhân tố khác?`;
+  if (processMatch) return `Trong thực tiễn, ${resolveQuestionSubject(processMatch[1], title)} được tiến hành theo những bước cơ bản nào?`;
+  if (actionMatch) return `Người cán bộ phân đội cần thực hiện ${resolveQuestionSubject(actionMatch[1], title)} như thế nào để đạt hiệu quả cao?`;
 
   const norm = normalizeTextKey(stripped);
   if (norm.startsWith("la cach thuc")) {
-    return `${title} tác động đến quân nhân bằng cách nào?`;
+    return `Theo các đồng chí, ${title} tác động đến nhận thức và hành vi của quân nhân bằng cách nào?`;
   }
   if (norm.startsWith("la he thong")) {
-    return `${title} gồm những cách thức, biện pháp nào?`;
+    return `Theo các đồng chí, ${title} gồm những cách thức, biện pháp cơ bản nào?`;
   }
   if (norm.startsWith("la hinh thuc")) {
-    return `${title} được hiểu như thế nào?`;
+    return `Theo các đồng chí, đặc trưng cơ bản của ${title} thể hiện như thế nào?`;
   }
   if (norm.startsWith("la giai doan")) {
-    return `${title} giữ vai trò gì trong quá trình giáo dục?`;
+    return `Theo các đồng chí, giai đoạn này giữ vai trò gì đối với kết quả quá trình giáo dục?`;
   }
 
   return null;
@@ -470,7 +470,7 @@ function buildContextualQuestionFallback(lesson: LessonDocumentModel, anchor: An
   }
 
   if (!finalQuestion) {
-    finalQuestion = "Theo đoạn nội dung vừa học, ý chính cần nắm là gì?";
+    finalQuestion = `Theo các đồng chí, vấn đề cốt lõi cần nắm vững ở nội dung ${title} là gì?`;
   }
 
   const answer = contextLines.length > 0 ? contextLines.join(" ") : `${title} có nội dung chính cần tự học.`;
@@ -531,6 +531,19 @@ function stripLeadingLabel(text: string, prefix: string): string {
     return normText.slice(normPref.length).replace(/^[:\s\-]+/, "").trim();
   }
   return normText;
+}
+
+export function sanitizePedagogicalQuestion(questionText: string, title: string): string {
+  let q = questionText.trim();
+  if (/ý chính cần nắm là gì/i.test(q) || /nội dung trọng tâm là gì/i.test(q)) {
+    return `Theo các đồng chí, vấn đề cốt lõi cần nắm vững ở nội dung ${title} là gì?`;
+  }
+  const defMatch = q.match(/^(?:Theo các đồng chí,?\s*)?(.+?)\s+(?:cũng\s+)?là gì\??$/i);
+  if (defMatch) {
+    const subj = resolveQuestionSubject(defMatch[1], title);
+    return `Theo các đồng chí, bản chất cốt lõi của ${subj} thể hiện ở những đặc trưng nào?`;
+  }
+  return q;
 }
 
 function paragraphBlock(anchor: Anchor, referenceBlock: BlockNode | null, orderIndex: number, text: string): BlockNode {
@@ -617,13 +630,15 @@ function appendQuestionInsertions(
 
   const questionLabel = "Câu hỏi:";
   const answerLabel = "Trả lời:";
+  const anchorTitle = cleanAnchorTitle(anchor);
   const questionSlots = allocateQuestionReferenceBlocks(lesson, anchor, questions.length, referenceBlock);
 
   let currentIdx = nextIndex;
   for (let i = 0; i < questions.length; i++) {
     const item = questions[i];
     const slotBlock = questionSlots[i];
-    const questionText = `${questionLabel} ${stripLeadingLabel(item.question, questionLabel)}`;
+    const cleanQ = sanitizePedagogicalQuestion(item.question, anchorTitle);
+    const questionText = `${questionLabel} ${stripLeadingLabel(cleanQ, questionLabel)}`;
     const answerText = `${answerLabel} ${stripLeadingLabel(item.answer, answerLabel)}`;
     const insertionBlockId = slotBlock ? slotBlock.id : anchor.block_id;
 
@@ -831,13 +846,21 @@ async function generateQuestionPayloads(
       const decisions = reviewsMap[item.anchor_id] || [];
       const filteredQuestions = item.questions.filter((q, qIndex) => {
         const decision = decisions.find((d) => d.question_index === qIndex + 1);
-        return !decision || decision.verdict !== "reject";
+        if (decision && decision.verdict === "reject") return false;
+        if (/^[^?]{2,60}\s+(?:cũng\s+)?là gì\??$/i.test(q.question.trim())) {
+          return false;
+        }
+        return true;
       });
 
-      const finalQuestions = filteredQuestions.length > 0 ? filteredQuestions : item.questions;
-      finalQuestions.forEach((q) => {
-        q.difficulty = normalizeDifficulty(q.difficulty || "basic");
-      });
+      const targetAnchor = questionAnchors.find((a) => a.id === item.anchor_id);
+      const anchorTitle = targetAnchor ? cleanAnchorTitle(targetAnchor) : "";
+      const candidateQuestions = filteredQuestions.length > 0 ? filteredQuestions : item.questions;
+      const finalQuestions = candidateQuestions.map((q) => ({
+        ...q,
+        question: sanitizePedagogicalQuestion(q.question, anchorTitle),
+        difficulty: normalizeDifficulty(q.difficulty || "basic")
+      }));
 
       payloadMap[item.anchor_id] = {
         recommended_methods: defaultMethodsForAnchor(lesson, questionAnchors.find((a) => a.id === item.anchor_id)!),

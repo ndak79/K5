@@ -4,7 +4,7 @@ import { parseCdrDocument } from "../server/document_pipeline/parse_cdr";
 import { parseGtDocument } from "../server/document_pipeline/parse_gt";
 import { buildLessonDocumentModel } from "../server/services/normalizer";
 import { composeDocumentBlocks } from "../server/services/document_composer";
-import { enrichLessonDocument } from "../server/services/enrichment_service";
+import { enrichLessonDocument, sanitizePedagogicalQuestion } from "../server/services/enrichment_service";
 import { CDR_FIXTURE, GT_FIXTURE } from "./fixtures";
 
 const NUMERIC_SECTION_HEADING = /^\s*\d+\s*(?:\.\s*\d+)+\s*[.:]?\s+\S/i;
@@ -89,4 +89,23 @@ test("content starts with NỘI DUNG without a copied chapter-title continuation
   assert.ok(contentTitleIndex >= 0);
   assert.match(blocks[contentTitleIndex + 1]?.text_preview || "", NUMERIC_SECTION_HEADING);
   assert.doesNotMatch(blocks[contentTitleIndex + 1]?.text_preview || "", /CỦA TÂM LÝ HỌC QUÂN SỰ/i);
+});
+
+test("pedagogical question sanitizer avoids mechanical definition questions like 'X là gì?'", () => {
+  assert.equal(
+    sanitizePedagogicalQuestion("Giáo dục là gì?", "Giáo dục"),
+    "Theo các đồng chí, bản chất cốt lõi của Giáo dục thể hiện ở những đặc trưng nào?"
+  );
+  assert.equal(
+    sanitizePedagogicalQuestion("Theo các đồng chí, Giáo dục học quân sự là gì?", "Giáo dục học quân sự"),
+    "Theo các đồng chí, bản chất cốt lõi của Giáo dục học quân sự thể hiện ở những đặc trưng nào?"
+  );
+  assert.equal(
+    sanitizePedagogicalQuestion("Theo đoạn nội dung vừa học, ý chính cần nắm là gì?", "Bài giảng"),
+    "Theo các đồng chí, vấn đề cốt lõi cần nắm vững ở nội dung Bài giảng là gì?"
+  );
+  assert.equal(
+    sanitizePedagogicalQuestion("Theo các đồng chí, giáo dục lúc này mang tính chất gì?", "Giáo dục"),
+    "Theo các đồng chí, giáo dục lúc này mang tính chất gì?"
+  );
 });

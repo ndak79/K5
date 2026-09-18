@@ -7,15 +7,22 @@ export interface PromptPackage {
 }
 
 export const QUESTION_FEW_SHOT_EXAMPLES = `[FEW-SHOT EXAMPLES]
-Vi du 1:
-- Noi dung: "Tinh khoa hoc doi hoi viec ton trong tinh khach quan va nam chac quy luat."
-- Cau hoi tot: "Vi sao can ton trong tinh khach quan va nam chac quy luat khi hoc noi dung nay?"
-- Tra loi tot: "Vi dieu do giup hoc vien hieu dung ban chat van de va van dung kien thuc phu hop."
+Vi du 1 (Doan trinh bay dinh nghia / khai niem):
+- Trich doan: "Giao duc hoc quan su la khoa hoc ve giao duc con nguoi trong luc luong vu trang nham xay dung quan nhan va tap the quan nhan co du pham chat, nang luc dap ung yeu cau hoat dong quan su."
+- Cau hoi SAI (may moc, cam dung): "Giao duc hoc quan su la gi?" (Vi doan van ngay truoc da dinh nghia ro rang, hoi lai la vo nghia).
+- Cau hoi TOT (goi mo, su pham): "Theo cac dong chi, ban chat cot loi cua Giao duc hoc quan su huong toi muc tieu gi trong xay dung quan doi?"
+- Tra loi TOT: "Huong toi xay dung quan nhan va tap the quan nhan phat trien toan dien ve pham chat chinh tri, dao duc va nang luc dap ung moi yeu cau hoat dong quan su."
 
-Vi du 2:
-- Noi dung: "Hoc vien so sanh cac giai phap, thao luan nhom va rut ra cach van dung."
-- Cau hoi tot: "Can rut ra cach van dung nao sau khi so sanh cac giai phap duoc neu?"
-- Tra loi tot: "Can doi chieu cac giai phap, chon cach phu hop va giai thich duoc ly do lua chon."
+Vi du 2 (Doan trinh bay dac trung / tinh chat):
+- Trich doan: "Lich su giao duc bat dau tu thoi ky cong san nguyen thuy, con nguoi chi cho nhau kinh nghiem san bat, hai luom, chua xuat hien giai cap va nha nuoc."
+- Cau hoi SAI: "Giao duc thoi ky cong san nguyen thuy la gi?"
+- Cau hoi TOT: "Theo cac dong chi, giao duc o thoi ky nay mang tinh chat gi?"
+- Tra loi TOT: "Mang tinh chat binh dang, phi giai cap va gan lien truc tiep voi kinh nghiem lao dong san xuat sinh ton."
+
+Vi du 3 (Doan trinh bay quy luat / nguyen tac):
+- Trich doan: "Tinh khoa hoc doi hoi viec ton trong tinh khach quan va nam chac quy luat trong huan luyen quan nhan."
+- Cau hoi TOT: "Vi sao nguoi can bo can ton trong tinh khach quan va nam chac quy luat khi tien hanh giao duc, huan luyen bo doi?"
+- Tra loi TOT: "Giup danh gia dung thuc chat trinh do cua quan nhan, khac phuc chu nghia kinh nghiem va de ra bien phap giao duc sat hop."
 `;
 
 export const METHOD_FEW_SHOT_EXAMPLES = `[FEW-SHOT EXAMPLES]
@@ -214,10 +221,14 @@ export function buildQuestionGeneratorPrompt(args: {
 }): PromptPackage {
   const constraints = [
     "Chi tao cau hoi va cau tra loi hoan toan bang tieng Viet co dau.",
+    "QUY TAC SU PHAM BAT BUOC: Khi doan van vua trinh bay dinh nghia/khai niem, TUYET DOI KHONG dat cau hoi kieu '[Khai niem] la gi?'.",
+    "Cau hoi phai mang tinh goi mo dam thoai, khieu goi tu duy tren lop: hoi ve ban chat, dac trung, nguyen nhan/vi sao, hoac yeu cau van dung doi voi nguoi can bo.",
+    "Van phong cau hoi mo dau bang cum tu su pham: 'Theo cac dong chi,...', 'Vi sao...', 'Ban chat cua... the hien o nhung diem nao?', 'Tu quy dinh tren, nguoi can bo can chu y dieu gi?'.",
     "Tuyet doi khong lap lai tieu de muc mot cach may moc lam cau hoi.",
     "Khong dung cum generic nhu 'Doan tren nhan manh' hay 'Noi dung trong tam la'.",
     "Phai tuan thu nghiem ngat so luong cau hoi question_quota duoc yeu cau.",
-    "Cac cau hoi trong cung mot doan phai hoi ve cac khia quang khac nhau, tranh trung lap y tuong."
+    "Cac cau hoi trong cung mot doan phai hoi ve cac khia quang khac nhau, tranh trung lap y tuong.",
+    "Cau tra loi phai co tinh tong ket, co dong, giup hoc vien khac sau ban chat kien thuc, khong chep lai ca doan van dai."
   ];
 
   return buildPromptPackage({
@@ -280,7 +291,9 @@ export function buildQuestionReviewerPrompt(args: {
   profile?: typeof DEFAULT_PROMPT_PROFILE;
 }): PromptPackage {
   const constraints = [
-    "Manh dan reject cac cau hoi chung chung nhu 'Day la gi?' hoac 'Voi tu cach la gi?'.",
+    "TUYET DOI REJECT cac cau hoi sao chep may moc dinh nghia kieu '[Khai niem] la gi?' ngay sau doan vua neu dinh nghia.",
+    "TUYET DOI REJECT cac cau hoi chung chung nhu 'Day la gi?', 'Voi tu cach la gi?', 'Doan tren nhan manh dieu gi?'.",
+    "CHI ACCEPT cac cau hoi co tinh goi mo dam thoai tren lop, hoi ve ban chat, dac trung, ly do vi sao, hoac yeu cau van dung thuc tien.",
     "Tuyet doi reject cac cau hoi sao rong chi sao chep tieu de bai hoc.",
     "Tuyet doi khong sinh moi cau hoi. Chuc nang cua ban chi la accept hoac reject."
   ];
