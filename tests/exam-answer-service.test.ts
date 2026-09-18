@@ -9,6 +9,8 @@ import {
   findRelevantGtContext,
   generateAnswerForQuestion,
   compileExamAnswersDocx,
+  buildFallbackLevels,
+  extractQuestionSubject,
   examAnswerRuntime,
   resetExamAnswerRuntime,
   getExamAnswerSummary
@@ -44,6 +46,15 @@ test("finds relevant GT chapter context for a given question", () => {
   const context = findRelevantGtContext("Phân tích các đặc trưng của quá trình sư phạm quân sự", parsedGt);
   assert.ok(context.length > 100);
   assert.match(context, /GIÁO TRÌNH THAM KHẢO/);
+});
+
+test("formulates 3 distinct cognitive levels adhering to Bloom without overlap", () => {
+  const q = "Phân tích các đặc trưng của quá trình sư phạm quân sự. Ý nghĩa vận dụng đối với người cán bộ phân đội để nâng cao hiệu quả quá trình sư phạm ở đơn vị hiện nay.";
+  const levels = buildFallbackLevels(q);
+  assert.ok(levels.easy.startsWith("Nêu"));
+  assert.equal(levels.easy.toLowerCase().includes("phân tích"), false, "Easy level must not contain Phân tích");
+  assert.ok(levels.medium.startsWith("Trình bày"));
+  assert.ok(levels.hard.startsWith("Phân tích"));
 });
 
 test("generates structured answer with 5,0đ scale and exports docx", async () => {

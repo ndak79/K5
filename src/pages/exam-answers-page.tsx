@@ -771,6 +771,70 @@ export function ExamAnswersPage() {
                     </div>
                   ))}
                 </div>
+
+                {/* 3 Levels */}
+                <div className="space-y-3 p-4 bg-sage-light/20 rounded-xl border border-sage-border">
+                  <h5 className="font-bold text-accent font-serif">Đề xuất 3 mức độ câu hỏi (Dễ, Trung bình, Khó):</h5>
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-ink/70 mb-1">1. Mức Dễ (Nhận biết - Tái hiện):</label>
+                      <textarea
+                        rows={2}
+                        value={editingAnswer.levels?.easy || ""}
+                        onChange={(e) =>
+                          setEditingAnswer({
+                            ...editingAnswer,
+                            levels: {
+                              easy: e.target.value,
+                              medium: editingAnswer.levels?.medium || "",
+                              hard: editingAnswer.levels?.hard || ""
+                            }
+                          })
+                        }
+                        className="w-full p-2 bg-white border border-sage-border rounded-lg text-ink"
+                        placeholder="Nêu... và làm rõ khái niệm..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-ink/70 mb-1">2. Mức Trung bình (Thông hiểu & Vận dụng cơ bản):</label>
+                      <textarea
+                        rows={2}
+                        value={editingAnswer.levels?.medium || ""}
+                        onChange={(e) =>
+                          setEditingAnswer({
+                            ...editingAnswer,
+                            levels: {
+                              easy: editingAnswer.levels?.easy || "",
+                              medium: e.target.value,
+                              hard: editingAnswer.levels?.hard || ""
+                            }
+                          })
+                        }
+                        className="w-full p-2 bg-white border border-sage-border rounded-lg text-ink"
+                        placeholder="Trình bày nội dung... Rút ra các yêu cầu vận dụng..."
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-ink/70 mb-1">3. Mức Khó (Phân tích sâu & Vận dụng sáng tạo):</label>
+                      <textarea
+                        rows={2}
+                        value={editingAnswer.levels?.hard || ""}
+                        onChange={(e) =>
+                          setEditingAnswer({
+                            ...editingAnswer,
+                            levels: {
+                              easy: editingAnswer.levels?.easy || "",
+                              medium: editingAnswer.levels?.medium || "",
+                              hard: e.target.value
+                            }
+                          })
+                        }
+                        className="w-full p-2 bg-white border border-sage-border rounded-lg text-ink"
+                        placeholder="Phân tích toàn diện/tính biện chứng... Từ đó luận giải các biện pháp..."
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="p-4 border-t border-sage-border bg-sage-light/30 flex items-center justify-end gap-3">
@@ -795,4 +859,3 @@ export function ExamAnswersPage() {
     </Layout>
   );
 }
-

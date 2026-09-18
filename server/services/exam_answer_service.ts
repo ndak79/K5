@@ -354,6 +354,23 @@ function getAiClient(): OpenAICompatibleClient | null {
   }
 }
 
+export function extractQuestionSubject(questionText: string): string {
+  let s = questionText.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  s = s.replace(/^(?:Phân tích|Nêu|Trình bày|Làm rõ|Giải thích)\s+/i, "");
+  s = s.replace(/[.;]\s*(?:Ý nghĩa vận dụng|Vận dụng).*$/i, "");
+  return s.trim();
+}
+
+export function buildFallbackLevels(questionText: string): { easy: string; medium: string; hard: string } {
+  const subject = extractQuestionSubject(questionText);
+  const normalizedSubject = subject ? subject.charAt(0).toLowerCase() + subject.slice(1) : "nội dung câu hỏi";
+  return {
+    easy: `Nêu ${normalizedSubject} và làm rõ các khái niệm cơ bản liên quan.`,
+    medium: `Trình bày nội dung ${normalizedSubject}. Rút ra các yêu cầu vận dụng đối với người cán bộ phân đội ở đơn vị hiện nay.`,
+    hard: `Phân tích tính biện chứng trong ${normalizedSubject}. Từ đó luận giải các biện pháp của người cán bộ phân đội nhằm nâng cao hiệu quả công tác ở đơn vị hiện nay.`
+  };
+}
+
 function buildDefaultFallbackAnswer(questionNumber: number, questionText: string, clos: CloDefinition[]): ExamAnswerModel {
   const defaultClos = clos.slice(0, 4).map((c) => c.code);
   if (!defaultClos.includes("1.1")) defaultClos.unshift("1.1");
@@ -420,11 +437,7 @@ function buildDefaultFallbackAnswer(questionNumber: number, questionText: string
       score: "0,25đ"
     },
     clos: defaultClos,
-    levels: {
-      easy: `Nêu các nội dung cơ bản của: ${questionText.slice(0, 100)}...`,
-      medium: `Trình bày các nội dung cơ bản và ý nghĩa thực tiễn của: ${questionText.slice(0, 100)}...`,
-      hard: questionText
-    }
+    levels: buildFallbackLevels(questionText)
   };
 }
 
@@ -468,10 +481,17 @@ ${cloListStr}
    - Tổng điểm toàn bài: đúng "5,0đ" (0,25đ + 2,5đ + 2,0đ + 0,25đ = 5,0đ).
 2. Dung lượng đáp án: Vừa đủ, sâu sắc, không quá ngắn và không quá dài (độ dài toàn bộ nội dung đáp án đạt khoảng 2500 đến 3200 ký tự, tương đương khoảng 600 đến 800 từ tiếng Việt), văn phong sư phạm quân sự chuẩn mực.
 3. Ánh xạ CLO: Lựa chọn các mã CLO phù hợp nhất từ danh mục CLO ở trên (mảng clos chứa các mã như ["1.1", "1.2", "2.2", "3.1", "3.2"]).
-4. Các câu hỏi ở 3 mức độ (levels):
-   - easy: Câu hỏi mức Dễ (thường bắt đầu bằng 'Nêu tên...', 'Phân tích một khía cạnh cụ thể...')
-   - medium: Câu hỏi mức Trung bình (thường bắt đầu bằng 'Trình bày...', 'Ý nghĩa vận dụng...')
-   - hard: Câu hỏi mức Khó (thường bắt đầu bằng 'Phân tích...', 'Ý nghĩa vận dụng toàn diện...')
+4. Các câu hỏi ở 3 mức độ (levels) - BẮT BUỘC phân hóa rõ ràng theo chuẩn nhận thức Bloom, không dùng trùng lặp động từ và đúng bản chất khảo thí:
+   - easy: Mức Dễ (Cấp độ Nhận biết - Tái hiện kiến thức):
+     * Yêu cầu nêu/liệt kê tên các đặc trưng, nội dung, quy luật hoặc nguyên tắc và làm rõ định nghĩa/khái niệm cơ bản liên quan.
+     * TUYỆT ĐỐI KHÔNG dùng từ "Phân tích", không yêu cầu vận dụng thực tế phức tạp.
+     * Bắt đầu bằng: "Nêu..." hoặc "Liệt kê... và làm rõ khái niệm...".
+   - medium: Mức Trung bình (Cấp độ Thông hiểu - Vận dụng cơ bản):
+     * Yêu cầu trình bày, làm rõ nội dung bản chất của vấn đề và rút ra các yêu cầu/ý nghĩa vận dụng đối với người cán bộ phân đội.
+     * Bắt đầu bằng: "Trình bày nội dung... Rút ra các yêu cầu vận dụng đối với người cán bộ phân đội ở đơn vị hiện nay."
+   - hard: Mức Khó (Cấp độ Phân tích sâu - Vận dụng sáng tạo / Xử lý thực tiễn):
+     * Yêu cầu phân tích sâu sắc cơ sở lý luận, tính quy luật, tính biện chứng và luận giải các biện pháp sư phạm, cách thức tiến hành của người cán bộ phân đội nhằm nâng cao hiệu quả công tác ở đơn vị.
+     * Bắt đầu bằng: "Phân tích toàn diện/tính biện chứng... Từ đó luận giải các biện pháp của người cán bộ phân đội nhằm nâng cao hiệu quả công tác ở đơn vị hiện nay."
 
 Đầu ra BẮT BUỘC là đối tượng JSON sạch với cấu trúc:
 {
@@ -537,6 +557,22 @@ Không kèm theo bất kỳ văn bản giải thích nào ngoài chuỗi JSON.`;
     }
     if (!answerModel.clos || answerModel.clos.length === 0) {
       answerModel.clos = ["1.1", "1.2", "2.1", "2.2", "3.1", "3.2"];
+    }
+    if (!answerModel.levels || !answerModel.levels.easy || !answerModel.levels.medium || !answerModel.levels.hard) {
+      answerModel.levels = buildFallbackLevels(qItem.question);
+    } else {
+      // Ensure easy level strictly adheres to Bloom remembering (never start with Phân tích)
+      if (answerModel.levels.easy.toLowerCase().startsWith("phân tích")) {
+        answerModel.levels.easy = answerModel.levels.easy.replace(/^phân tích\s+/i, "Nêu ");
+      }
+      // Ensure medium level starts with Trình bày
+      if (!answerModel.levels.medium.toLowerCase().startsWith("trình bày")) {
+        answerModel.levels.medium = `Trình bày ${answerModel.levels.medium.replace(/^(?:Nêu|Phân tích)\s+/i, "")}`;
+      }
+      // Ensure hard level starts with Phân tích
+      if (!answerModel.levels.hard.toLowerCase().startsWith("phân tích")) {
+        answerModel.levels.hard = `Phân tích ${answerModel.levels.hard.replace(/^(?:Nêu|Trình bày)\s+/i, "")}`;
+      }
     }
 
     qItem.answer = answerModel;
