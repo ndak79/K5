@@ -50,12 +50,23 @@ export interface PreviewBlock {
   textPreview: string;
   orderIndex: number;
   tableRows?: string[][];
+  isDiagram?: boolean;
 }
 
 export interface AnchorPreview {
   id: string;
   kind: "content_duration" | "section_duration" | "method" | "question_answer";
   label: string;
+}
+
+export interface DiagramSectionPreview {
+  title: string;
+  children: string[];
+}
+
+export interface DiagramDataPreview {
+  title: string;
+  sections: DiagramSectionPreview[];
 }
 
 export interface LessonPreviewModel {
@@ -66,6 +77,7 @@ export interface LessonPreviewModel {
   documentBlocks: PreviewBlock[];
   anchors: AnchorPreview[];
   generatedBlocks: PreviewBlock[];
+  diagramData?: DiagramDataPreview;
 }
 
 export interface CLIProxyLoginResult {

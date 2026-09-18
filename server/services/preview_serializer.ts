@@ -1,5 +1,6 @@
 import { DOMParser } from "@xmldom/xmldom";
 import { BlockNode } from "../document_pipeline/ooxml_range_extractor";
+import { buildLessonDiagramData } from "../document_pipeline/lesson_diagram";
 import { GeneratedInsertion, LessonDocumentModel } from "./normalizer";
 import { composeDocumentBlocks } from "./document_composer";
 
@@ -47,6 +48,7 @@ function serializeBlock(block: BlockNode): Record<string, any> {
     textPreview: block.text_preview,
     styleRef: block.style_ref ?? null,
     anchorRef: block.anchor_ref ?? null,
+    isDiagram: block.id === "generated-diagram-block",
     orderIndex: block.order_index
   };
 
@@ -67,6 +69,7 @@ export function serializeLessonPreview(
   return {
     lessonId: lesson.lesson_id,
     lessonTitle: lesson.lesson_title,
+    diagramData: buildLessonDiagramData(lesson),
     partOneBlocks: lesson.part_one_blocks.map((b) => serializeBlock(b)),
     partTwoBlocks: lesson.part_two_blocks.map((b) => serializeBlock(b)),
     documentBlocks: composeDocumentBlocks(lesson, insertions).map((b) => serializeBlock(b)),

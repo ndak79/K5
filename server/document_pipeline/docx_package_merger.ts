@@ -14,6 +14,13 @@ export interface DocxBlockInput {
   sourcePath: string;
 }
 
+export interface ExtraPackageMedia {
+  partPath: string;
+  bytes: Buffer;
+  relId: string;
+  contentType?: string;
+}
+
 interface SourceMaps {
   styleIds: Map<string, string>;
   abstractNumIds: Map<string, string>;
@@ -295,7 +302,8 @@ export function mergeDocxPackages(
   basePath: string,
   importedPath: string,
   blockInputs: DocxBlockInput[],
-  outputPath: string
+  outputPath: string,
+  extraMedia?: ExtraPackageMedia[]
 ): string {
   const baseZip = new AdmZip(basePath);
   const importedZip = new AdmZip(importedPath);
@@ -308,6 +316,34 @@ export function mergeDocxPackages(
   const importedBlocks = blockInputs.filter((input) => path.resolve(input.sourcePath) === path.resolve(importedPath));
   for (const input of importedBlocks) {
     copySourceRelationshipParts(baseZip, importedZip, input.xml, sourceMaps);
+  }
+
+  if (extraMedia && extraMedia.length > 0) {
+    const relsXml = getEntryText(baseZip, "word/_rels/document.xml.rels");
+    if (relsXml) {
+      const relsDoc = parseXml(relsXml);
+      const relsRoot = relsDoc.documentElement;
+      for (const item of extraMedia) {
+        baseZip.addFile(item.partPath, item.bytes);
+        const rel = relsDoc.createElementNS(PACKAGE_RELATIONSHIPS_NAMESPACE, "Relationship");
+        rel.setAttribute("Id", item.relId);
+        rel.setAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image");
+        const relTarget = item.partPath.startsWith("word/") ? item.partPath.slice(5) : item.partPath;
+        rel.setAttribute("Target", relTarget);
+        relsRoot.appendChild(rel);
+      }
+      baseZip.updateFile("word/_rels/document.xml.rels", Buffer.from(serializeXml(relsDoc), "utf8"));
+    }
+
+    let ctXml = getEntryText(baseZip, "[Content_Types].xml");
+    if (ctXml && !ctXml.includes('Extension="png"')) {
+      const ctDoc = parseXml(ctXml);
+      const newCt = ctDoc.createElementNS(CONTENT_TYPES_NAMESPACE, "Default");
+      newCt.setAttribute("Extension", "png");
+      newCt.setAttribute("ContentType", "image/png");
+      ctDoc.documentElement.appendChild(newCt);
+      baseZip.updateFile("[Content_Types].xml", Buffer.from(serializeXml(ctDoc), "utf8"));
+    }
   }
 
   const mapsBySource = new Map<string, SourceMaps>();

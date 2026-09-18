@@ -1,10 +1,75 @@
 import { BlockNode } from "../document_pipeline/ooxml_range_extractor";
+import { buildDiagramDrawingXml } from "../document_pipeline/lesson_diagram";
 import { GeneratedInsertion, LessonDocumentModel } from "./normalizer";
 import { buildInsertedParagraphXml, inheritStyle } from "./style_inheritance";
 import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 
 function buildContentTitleText(): string {
   return "NỘI DUNG";
+}
+
+export function buildConclusionTitleBlock(
+  lesson: LessonDocumentModel,
+  referenceBlock: BlockNode | null,
+  orderIndex: number
+): BlockNode {
+  const style = inheritStyle(referenceBlock);
+  const titleText = "III. KẾT THÚC BÀI GIẢNG";
+
+  return {
+    id: "generated-conclusion-title",
+    kind: "inserted_paragraph",
+    source: "generated",
+    text_preview: titleText,
+    xml: buildInsertedParagraphXml(titleText, style, {
+      italic: false,
+      bold: true,
+      align: "center",
+      page_break_before: false
+    }),
+    order_index: orderIndex
+  };
+}
+
+export function buildConclusionSubtitleBlock(
+  lesson: LessonDocumentModel,
+  referenceBlock: BlockNode | null,
+  orderIndex: number
+): BlockNode {
+  const style = inheritStyle(referenceBlock);
+  const subtitleText = "- Hệ thống nội dung bài giảng (Sơ đồ hoá):";
+
+  return {
+    id: "generated-conclusion-subtitle",
+    kind: "inserted_paragraph",
+    source: "generated",
+    text_preview: subtitleText,
+    xml: buildInsertedParagraphXml(subtitleText, style, {
+      italic: true,
+      bold: false,
+      align: "both"
+    }),
+    order_index: orderIndex
+  };
+}
+
+export function buildDiagramBlock(
+  lesson: LessonDocumentModel,
+  orderIndex: number,
+  options?: { rId?: string; cx?: number; cy?: number }
+): BlockNode {
+  const rId = options?.rId || "rIdDiagramEnding";
+  const cx = options?.cx || 5760000;
+  const cy = options?.cy || 2880000;
+
+  return {
+    id: "generated-diagram-block",
+    kind: "inserted_paragraph",
+    source: "generated",
+    text_preview: "[Sơ đồ khối hệ thống nội dung bài giảng]",
+    xml: buildDiagramDrawingXml(rId, cx, cy),
+    order_index: orderIndex
+  };
 }
 
 function uppercaseTextBlock(block: BlockNode): BlockNode {
@@ -86,7 +151,11 @@ function trimBoundaryBlanks(
 
 export function composeDocumentBlocks(
   lesson: LessonDocumentModel,
-  insertions: GeneratedInsertion[]
+  insertions: GeneratedInsertion[],
+  options?: {
+    diagramOptions?: { rId?: string; cx?: number; cy?: number };
+    includeConclusion?: boolean;
+  }
 ): BlockNode[] {
   const groupedInsertions: Record<string, GeneratedInsertion[]> = {};
   const rootInsertions: GeneratedInsertion[] = [];
@@ -128,6 +197,17 @@ export function composeDocumentBlocks(
     for (const img of blockInsertions) {
       result.push(img.block);
     }
+  }
+
+  // --- PHẦN III: KẾT THÚC BÀI GIẢNG ---
+  if (options?.includeConclusion !== false) {
+    const conclusionTitle = buildConclusionTitleBlock(lesson, referenceBlock, result.length);
+    const conclusionSubtitle = buildConclusionSubtitleBlock(lesson, referenceBlock, result.length + 1);
+    const diagramBlock = buildDiagramBlock(lesson, result.length + 2, options?.diagramOptions);
+
+    result.push(conclusionTitle);
+    result.push(conclusionSubtitle);
+    result.push(diagramBlock);
   }
 
   return result;

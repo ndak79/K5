@@ -91,6 +91,21 @@ test("content starts with NỘI DUNG without a copied chapter-title continuation
   assert.doesNotMatch(blocks[contentTitleIndex + 1]?.text_preview || "", /CỦA TÂM LÝ HỌC QUÂN SỰ/i);
 });
 
+test("appends conclusion section III and diagram block at the end of the lesson", () => {
+  const lesson = fixtureLesson();
+  const blocks = composeDocumentBlocks(lesson, []);
+  const conclusionTitle = blocks.find((b) => b.id === "generated-conclusion-title");
+  const conclusionSubtitle = blocks.find((b) => b.id === "generated-conclusion-subtitle");
+  const diagramBlock = blocks.find((b) => b.id === "generated-diagram-block");
+
+  assert.ok(conclusionTitle, "missing conclusion title block");
+  assert.equal(conclusionTitle.text_preview, "III. KẾT THÚC BÀI GIẢNG");
+  assert.ok(conclusionSubtitle, "missing conclusion subtitle block");
+  assert.match(conclusionSubtitle.text_preview, /Hệ thống nội dung bài giảng/);
+  assert.ok(diagramBlock, "missing diagram block");
+  assert.match(diagramBlock.xml || "", /w:drawing/);
+});
+
 test("pedagogical question sanitizer avoids mechanical definition questions like 'X là gì?'", () => {
   assert.equal(
     sanitizePedagogicalQuestion("Giáo dục là gì?", "Giáo dục"),
