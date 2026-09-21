@@ -82,19 +82,6 @@ export function Layout({
               </div>
             </div>
 
-            {/* Right side: Project status card */}
-            <div className="hidden sm:flex items-center space-x-4">
-              <div className="flex items-center gap-3 px-3.5 py-1.5 bg-white/50 rounded-xl border border-sage-border/40 text-xs">
-                <div className="text-right">
-                  <p className="font-semibold text-accent leading-none text-xs">Project: Lesson_Norm</p>
-                  <p className="text-[9px] opacity-60 mt-0.5">67% hoàn thành</p>
-                </div>
-                <div className="w-16 bg-sage-border h-1.5 rounded-full overflow-hidden">
-                  <div className="bg-accent w-2/3 h-full rounded-full"></div>
-                </div>
-              </div>
-            </div>
-
             {/* Mobile Navigation controls */}
             <div className="md:hidden flex items-center space-x-2">
               <Link

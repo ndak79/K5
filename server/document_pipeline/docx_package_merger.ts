@@ -332,19 +332,32 @@ export function mergeDocxPackages(
         rel.setAttribute("Target", relTarget);
         relsRoot.appendChild(rel);
       }
-      baseZip.updateFile("word/_rels/document.xml.rels", Buffer.from(serializeXml(relsDoc), "utf8"));
-    }
+    baseZip.updateFile("word/_rels/document.xml.rels", Buffer.from(serializeXml(relsDoc), "utf8"));
+  }
 
-    let ctXml = getEntryText(baseZip, "[Content_Types].xml");
-    if (ctXml && !ctXml.includes('Extension="png"')) {
-      const ctDoc = parseXml(ctXml);
+  let ctXml = getEntryText(baseZip, "[Content_Types].xml");
+  if (ctXml) {
+    const ctDoc = parseXml(ctXml);
+    let changed = false;
+    if (!ctXml.includes('Extension="png"')) {
       const newCt = ctDoc.createElementNS(CONTENT_TYPES_NAMESPACE, "Default");
       newCt.setAttribute("Extension", "png");
       newCt.setAttribute("ContentType", "image/png");
       ctDoc.documentElement.appendChild(newCt);
+      changed = true;
+    }
+    if (!ctXml.includes('Extension="svg"')) {
+      const newCt = ctDoc.createElementNS(CONTENT_TYPES_NAMESPACE, "Default");
+      newCt.setAttribute("Extension", "svg");
+      newCt.setAttribute("ContentType", "image/svg+xml");
+      ctDoc.documentElement.appendChild(newCt);
+      changed = true;
+    }
+    if (changed) {
       baseZip.updateFile("[Content_Types].xml", Buffer.from(serializeXml(ctDoc), "utf8"));
     }
   }
+}
 
   const mapsBySource = new Map<string, SourceMaps>();
   if (importedBlocks.length > 0) mapsBySource.set(importedPath, sourceMaps);

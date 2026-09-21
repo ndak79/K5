@@ -56,9 +56,10 @@ export function buildConclusionSubtitleBlock(
 export function buildDiagramBlock(
   lesson: LessonDocumentModel,
   orderIndex: number,
-  options?: { rId?: string; cx?: number; cy?: number }
+  options?: { rId?: string; svgRelId?: string; pngRelId?: string; cx?: number; cy?: number }
 ): BlockNode {
-  const rId = options?.rId || "rIdDiagramEnding";
+  const svgRelId = options?.svgRelId || "rIdDiagramSvg";
+  const pngRelId = options?.pngRelId || options?.rId || "rIdDiagramPng";
   const cx = options?.cx || 5760000;
   const cy = options?.cy || 2880000;
 
@@ -67,7 +68,7 @@ export function buildDiagramBlock(
     kind: "inserted_paragraph",
     source: "generated",
     text_preview: "[Sơ đồ khối hệ thống nội dung bài giảng]",
-    xml: buildDiagramDrawingXml(rId, cx, cy),
+    xml: buildDiagramDrawingXml(svgRelId, pngRelId, cx, cy),
     order_index: orderIndex
   };
 }
@@ -174,7 +175,7 @@ export function composeDocumentBlocks(
   const partOneBlocks = uppercaseLessonTitle(
     trimBoundaryBlanks(lesson.part_one_blocks, { trimEnd: true })
   );
-  const partTwoBlocks = trimBoundaryBlanks(lesson.part_two_blocks, { trimStart: true });
+  const partTwoBlocks = trimBoundaryBlanks(lesson.part_two_blocks, { trimStart: true, trimEnd: true });
 
   const result: BlockNode[] = [...partOneBlocks];
   const referenceBlock = partTwoBlocks.length > 0 ? partTwoBlocks[0] : null;

@@ -48,13 +48,13 @@ def render_diagram(data, output_path):
     if total_leaves == 0:
         total_leaves = 1
         
-    # Scale factor for crisp retina rendering (2x)
-    scale = 2
+    # Scale factor for ultra-sharp 300+ DPI crisp rendering (4x supersampling)
+    scale = 4
     
     # Dimensions in virtual pixels (then multiplied by scale)
-    box_gap_x = 16
-    leaf_w = 175
-    leaf_h = 100
+    box_gap_x = 20
+    leaf_w = 180
+    leaf_h = 95
     
     # Total width based on leaves
     inner_width = total_leaves * leaf_w + (total_leaves - 1) * box_gap_x

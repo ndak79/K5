@@ -4,12 +4,12 @@ import * as path from "node:path";
 import { LessonDocumentModel, GeneratedInsertion } from "../services/normalizer";
 import { composeDocumentBlocks } from "../services/document_composer";
 import { DocxBlockInput, ExtraPackageMedia, mergeDocxPackages } from "./docx_package_merger";
-import { buildLessonDiagramData, renderLessonDiagramPng } from "./lesson_diagram";
+import { buildLessonDiagramData, generateLessonDiagramSvg, renderLessonDiagramPng } from "./lesson_diagram";
 
 function buildExportBlocks(
   lesson: LessonDocumentModel,
   insertions: GeneratedInsertion[],
-  diagramOptions?: { rId?: string; cx?: number; cy?: number }
+  diagramOptions?: { rId?: string; svgRelId?: string; pngRelId?: string; cx?: number; cy?: number }
 ): DocxBlockInput[] {
   const cdrPath = lesson.cdr_lesson.range.document_path;
   const gtPath = lesson.gt_chapter.range.document_path;
@@ -29,19 +29,23 @@ export function exportLessonDocument(
   const cdrPath = path.resolve(lesson.cdr_lesson.range.document_path);
   const gtPath = path.resolve(lesson.gt_chapter.range.document_path);
 
-  // Render diagram PNG
+  // Render diagram SVG (primary vector) and high-res PNG (fallback)
   const diagramData = buildLessonDiagramData(lesson);
+  const svgResult = generateLessonDiagramSvg(diagramData);
+  const svgBytes = Buffer.from(svgResult.svg, "utf8");
+
   const tempPngPath = path.join(os.tmpdir(), `diagram_${lesson.lesson_id}_${Date.now()}.png`);
-  let diagramDims = { width: 1200, height: 600 };
+  let diagramDims = { width: svgResult.width, height: svgResult.height };
   let diagramBytes: Buffer | null = null;
 
   try {
-    diagramDims = renderLessonDiagramPng(diagramData, tempPngPath);
+    const pngDims = renderLessonDiagramPng(diagramData, tempPngPath);
+    if (pngDims && pngDims.width > 0) diagramDims = pngDims;
     if (fs.existsSync(tempPngPath)) {
       diagramBytes = fs.readFileSync(tempPngPath);
     }
   } catch (err) {
-    console.warn("Failed to generate diagram for export:", err);
+    console.warn("Failed to generate fallback PNG diagram for export:", err);
   } finally {
     if (fs.existsSync(tempPngPath)) {
       try {
@@ -53,18 +57,31 @@ export function exportLessonDocument(
   const cx = 5760000;
   const cy = Math.round(cx * (diagramDims.height / (diagramDims.width || 1)));
 
-  const blocks = buildExportBlocks(lesson, insertions, { rId: "rIdDiagramEnding", cx, cy });
+  const blocks = buildExportBlocks(lesson, insertions, {
+    svgRelId: "rIdDiagramSvg",
+    pngRelId: "rIdDiagramPng",
+    rId: "rIdDiagramEnding",
+    cx,
+    cy
+  });
 
-  const extraMedia: ExtraPackageMedia[] = diagramBytes
-    ? [
-        {
-          partPath: "word/media/lesson_diagram.png",
-          bytes: diagramBytes,
-          relId: "rIdDiagramEnding",
-          contentType: "image/png"
-        }
-      ]
-    : [];
+  const extraMedia: ExtraPackageMedia[] = [
+    {
+      partPath: "word/media/lesson_diagram.svg",
+      bytes: svgBytes,
+      relId: "rIdDiagramSvg",
+      contentType: "image/svg+xml"
+    }
+  ];
+
+  if (diagramBytes) {
+    extraMedia.push({
+      partPath: "word/media/lesson_diagram.png",
+      bytes: diagramBytes,
+      relId: "rIdDiagramPng",
+      contentType: "image/png"
+    });
+  }
 
   return mergeDocxPackages(gtPath, cdrPath, blocks, outputPath, extraMedia);
 }

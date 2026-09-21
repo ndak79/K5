@@ -78,6 +78,7 @@ export interface LessonPreviewModel {
   anchors: AnchorPreview[];
   generatedBlocks: PreviewBlock[];
   diagramData?: DiagramDataPreview;
+  diagramSvg?: string;
 }
 
 export interface CLIProxyLoginResult {

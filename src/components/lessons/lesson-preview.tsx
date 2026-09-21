@@ -77,7 +77,24 @@ function TablePreview({ block }: { block: PreviewBlock }) {
   );
 }
 
-function DiagramVisualPreview({ diagram }: { diagram?: LessonPreviewModel["diagramData"] }) {
+function DiagramVisualPreview({
+  diagram,
+  svg
+}: {
+  diagram?: LessonPreviewModel["diagramData"];
+  svg?: string;
+}) {
+  if (svg) {
+    return (
+      <div className="rounded-2xl border border-sage-border bg-white p-4 md:p-6 shadow-sm overflow-x-auto flex justify-center">
+        <div
+          className="w-full max-w-4xl"
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
+      </div>
+    );
+  }
+
   if (!diagram || !diagram.sections || diagram.sections.length === 0) {
     return (
       <div className="p-6 text-center text-xs text-ink/50 italic bg-white rounded-2xl border border-sage-border">
@@ -166,7 +183,7 @@ export function LessonPreview({ preview, onBack }: LessonPreviewProps) {
               {visibleBlocks.map((block) => (
                 <div key={block.id} className={blockClassName(block)}>
                   {block.isDiagram || block.id === "generated-diagram-block" ? (
-                    <DiagramVisualPreview diagram={preview?.diagramData} />
+                    <DiagramVisualPreview diagram={preview?.diagramData} svg={preview?.diagramSvg} />
                   ) : block.kind === "table" ? (
                     <TablePreview block={block} />
                   ) : (
