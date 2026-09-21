@@ -2,6 +2,7 @@ import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { DOMParser } from "@xmldom/xmldom";
 import { LessonDocumentModel } from "../services/normalizer";
 
 export interface DiagramSection {
@@ -12,6 +13,122 @@ export interface DiagramSection {
 export interface DiagramData {
   title: string;
   sections: DiagramSection[];
+}
+
+function isRunBold(r: any): boolean {
+  const b = r.getElementsByTagName("w:b")[0];
+  if (!b) return false;
+  const val = b.getAttribute("w:val");
+  return val !== "0" && val !== "false" && val !== "off";
+}
+
+function isParagraphBold(p: any): boolean {
+  const runs = Array.from(p.getElementsByTagName("w:r")) as any[];
+  if (runs.length === 0) return false;
+  let boldChars = 0;
+  let totalChars = 0;
+  for (const r of runs) {
+    const tNodes = Array.from(r.getElementsByTagName("w:t")) as any[];
+    const t = tNodes.map((x: any) => x.textContent || "").join("");
+    totalChars += t.length;
+    if (isRunBold(r)) {
+      boldChars += t.length;
+    }
+  }
+  return totalChars > 0 && boldChars / totalChars >= 0.5;
+}
+
+export function extractCdrDiagramSections(lesson: LessonDocumentModel): DiagramSection[] {
+  const tableBlocks = (lesson.cdr_lesson?.blocks || []).filter((b) => b.kind === "table" && b.xml);
+  if (tableBlocks.length === 0) return [];
+
+  const sections: DiagramSection[] = [];
+
+  for (const tblBlock of tableBlocks) {
+    if (!tblBlock.xml) continue;
+    const doc = new DOMParser().parseFromString(tblBlock.xml, "text/xml");
+    const trs = Array.from(doc.getElementsByTagName("w:tr"));
+    if (trs.length < 2) continue;
+
+    // Find column index for "Nội dung dạy học" or "Nội dung"
+    let contentColIdx = -1;
+    const headerCells = Array.from(trs[0].getElementsByTagName("w:tc")).map((tc) => {
+      const tNodes = Array.from(tc.getElementsByTagName("w:t")) as any[];
+      return tNodes.map((t: any) => t.textContent || "").join("").replace(/\s+/g, " ").trim();
+    });
+
+    for (let c = 0; c < headerCells.length; c++) {
+      if (/nội dung dạy học/i.test(headerCells[c])) {
+        contentColIdx = c;
+        break;
+      }
+    }
+    if (contentColIdx === -1) {
+      for (let c = 0; c < headerCells.length; c++) {
+        if (/^nội dung/i.test(headerCells[c])) {
+          contentColIdx = c;
+          break;
+        }
+      }
+    }
+    if (contentColIdx === -1) {
+      contentColIdx = 1;
+    }
+
+    let currentSection: DiagramSection | null = null;
+
+    for (let r = 1; r < trs.length; r++) {
+      const tcs = Array.from(trs[r].getElementsByTagName("w:tc"));
+      if (tcs.length <= contentColIdx) continue;
+
+      const tc = tcs[contentColIdx];
+      const ps = Array.from(tc.getElementsByTagName("w:p"));
+
+      let col0Text = "";
+      if (tcs.length > 0) {
+        const tNodes0 = Array.from(tcs[0].getElementsByTagName("w:t")) as any[];
+        col0Text = tNodes0.map((t: any) => t.textContent || "").join("").trim();
+      }
+
+      for (let pIdx = 0; pIdx < ps.length; pIdx++) {
+        const p = ps[pIdx];
+        const tNodes = Array.from(p.getElementsByTagName("w:t")) as any[];
+        const rawText = tNodes.map((t: any) => t.textContent || "").join("").replace(/\s+/g, " ").trim();
+        if (!rawText) continue;
+
+        const bold = isParagraphBold(p);
+        const hasBullet = /^[-+*•–—]\s*/.test(rawText);
+
+        const isLevel1 =
+          (bold && !hasBullet) ||
+          (!hasBullet && pIdx === 0 && !currentSection) ||
+          (!hasBullet && pIdx === 0 && /^[IVXLCDM]+\b/i.test(col0Text));
+
+        if (isLevel1) {
+          const cleanTitle = rawText.replace(/^[IVXLCDM]+\s*[.:–-]\s*/i, "").trim();
+          currentSection = {
+            title: cleanTitle,
+            children: []
+          };
+          sections.push(currentSection);
+        } else {
+          const cleanChild = rawText.replace(/^[-+*•–—]\s*/, "").trim();
+          if (cleanChild) {
+            if (!currentSection) {
+              currentSection = {
+                title: "Nội dung " + (sections.length + 1),
+                children: []
+              };
+              sections.push(currentSection);
+            }
+            currentSection.children.push(cleanChild);
+          }
+        }
+      }
+    }
+  }
+
+  return sections;
 }
 
 export function cleanOutlineTitle(rawTitle: string): string {
@@ -26,8 +143,12 @@ export function cleanOutlineTitle(rawTitle: string): string {
 }
 
 export function buildLessonDiagramData(lesson: LessonDocumentModel): DiagramData {
+  // 1. Prioritize extracting from CDR schedule table
+  let sections = extractCdrDiagramSections(lesson);
+
+  // 2. Fallback to GT outline if CDR table has no content
+  if (sections.length === 0) {
   const outlines = lesson.gt_chapter.outline;
-  const sections: DiagramSection[] = [];
   let currentSection: DiagramSection | null = null;
 
   for (const node of outlines) {
@@ -62,9 +183,10 @@ export function buildLessonDiagramData(lesson: LessonDocumentModel): DiagramData
       }
     }
   }
+  }
 
   // Format lesson title: clean up extra whitespace
-  const cleanTitle = lesson.lesson_title.replace(/\s+/g, " ").trim();
+  const cleanTitle = (lesson.cdr_lesson?.title || lesson.lesson_title).replace(/\s+/g, " ").trim();
 
   return {
     title: cleanTitle,

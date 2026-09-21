@@ -5,7 +5,9 @@ import { parseGtDocument } from "../server/document_pipeline/parse_gt";
 import { buildLessonDocumentModel } from "../server/services/normalizer";
 import { composeDocumentBlocks } from "../server/services/document_composer";
 import { enrichLessonDocument, sanitizePedagogicalQuestion } from "../server/services/enrichment_service";
+import { buildLessonDiagramData } from "../server/document_pipeline/lesson_diagram";
 import { CDR_FIXTURE, GT_FIXTURE } from "./fixtures";
+import * as fs from "node:fs";
 
 const NUMERIC_SECTION_HEADING = /^\s*\d+\s*(?:\.\s*\d+)+\s*[.:]?\s+\S/i;
 
@@ -123,4 +125,21 @@ test("pedagogical question sanitizer avoids mechanical definition questions like
     sanitizePedagogicalQuestion("Theo các đồng chí, giáo dục lúc này mang tính chất gì?", "Giáo dục"),
     "Theo các đồng chí, giáo dục lúc này mang tính chất gì?"
   );
+});
+
+test("extracts diagram data from CDR table if available with level 1 bold titles and level 2 bullets", () => {
+  if (!fs.existsSync("CDR.docx")) return;
+  const cdr = parseCdrDocument("CDR.docx");
+  const gt = parseGtDocument(GT_FIXTURE);
+  const chapter = gt.chapters.find((c) => c.chapter_number === 1);
+  assert.ok(chapter);
+  const lesson = buildLessonDocumentModel("lesson-cdr-diag", cdr.lessons[0], chapter);
+  const diagram = buildLessonDiagramData(lesson);
+
+  assert.ok(diagram.sections.length >= 2, "Expected at least 2 sections in lesson 1");
+  assert.match(diagram.sections[0].title, /Đối tượng và những khái niệm/i);
+  assert.ok(diagram.sections[0].children.length >= 3, "Expected at least 3 children in section 1");
+  assert.match(diagram.sections[0].children[0], /Sơ lược về sự phát triển/i);
+  assert.match(diagram.sections[1].title, /Nhiệm vụ, phương pháp nghiên cứu/i);
+  assert.ok(diagram.sections[1].children.length >= 3, "Expected at least 3 children in section 2");
 });
