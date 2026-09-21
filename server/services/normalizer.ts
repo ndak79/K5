@@ -1,3 +1,4 @@
+import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 import { BlockNode, OutlineNode, ParsedGtChapter, normalizeTextKey } from "../document_pipeline/parse_gt";
 import { ParsedCdrLesson } from "../document_pipeline/parse_cdr";
 import { locateAnchors, Anchor } from "./anchor_locator";
@@ -90,6 +91,115 @@ function collectExcludedRanges(blocks: BlockNode[]): ExcludedRange[] {
   return excludedRanges;
 }
 
+export function toRoman(num: number): string {
+  const romanMap: [number, string][] = [
+    [1000, "M"], [900, "CM"], [500, "D"], [400, "CD"],
+    [100, "C"], [90, "XC"], [50, "L"], [40, "XL"],
+    [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]
+  ];
+  let res = "";
+  let n = num;
+  for (const [val, letter] of romanMap) {
+    while (n >= val) {
+      res += letter;
+      n -= val;
+    }
+  }
+  return res || "I";
+}
+
+export function stripHeadingPrefix(text: string): string {
+  let s = text.replace(/^\s*\d+(?:\s*\.\s*\d+)*\s*[.:]?\s+/, "");
+  s = s.replace(/^\s*[IVXLC]+\s*[.:]\s+/, "");
+  return s.trim();
+}
+
+export function updateHeadingXml(
+  xml: string | null | undefined,
+  newPrefix: string,
+  isUpperCase = false
+): string | null {
+  if (!xml) return xml || null;
+  const doc = new DOMParser().parseFromString(xml, "text/xml");
+  const textNodes = Array.from(doc.getElementsByTagName("w:t"));
+  if (textNodes.length === 0) return xml;
+
+  const fullText = textNodes.map((n) => n.textContent || "").join("");
+  const match = fullText.match(/^(\s*\d+(?:\s*\.\s*\d+)*\s*[.:]?\s+|\s*[IVXLC]+\s*[.:]\s+)/);
+  if (!match) {
+    return xml;
+  }
+
+  const prefixLen = match[0].length;
+  let remaining = prefixLen;
+  for (let i = 0; i < textNodes.length; i++) {
+    const node = textNodes[i];
+    const t = node.textContent || "";
+    if (remaining > 0) {
+      if (t.length <= remaining) {
+        remaining -= t.length;
+        node.textContent = "";
+      } else {
+        node.textContent = t.slice(remaining);
+        remaining = 0;
+      }
+    }
+    if (isUpperCase && node.textContent) {
+      node.textContent = node.textContent.toLocaleUpperCase("vi-VN");
+    }
+  }
+
+  textNodes[0].textContent = newPrefix + (textNodes[0].textContent || "");
+  textNodes[0].setAttribute("xml:space", "preserve");
+  return new XMLSerializer().serializeToString(doc.documentElement);
+}
+
+function renumberOutlineAndBlocks(
+  partTwoBlocks: BlockNode[],
+  outlines: OutlineNode[]
+): void {
+  const blockById: Record<string, BlockNode> = {};
+  for (const block of partTwoBlocks) {
+    blockById[block.id] = block;
+  }
+
+  let level1Counter = 0;
+  let level2Counter = 0;
+
+  for (const node of outlines) {
+    if (node.level === 1) {
+      level1Counter++;
+      level2Counter = 0;
+      const newPrefix = `${toRoman(level1Counter)}. `;
+      const stripped = stripHeadingPrefix(node.original_title).toLocaleUpperCase("vi-VN");
+      const newTitle = `${newPrefix}${stripped}`;
+      node.normalized_title = newTitle;
+
+      if (node.block_id && blockById[node.block_id]) {
+        const block = blockById[node.block_id];
+        block.text_preview = newTitle;
+        if (block.xml) {
+          block.xml = updateHeadingXml(block.xml, newPrefix, true) || block.xml;
+        }
+      }
+    } else if (node.level === 2) {
+      level2Counter++;
+      const newPrefix = `${level2Counter}. `;
+      const stripped = stripHeadingPrefix(node.original_title);
+      const newTitle = `${newPrefix}${stripped}`;
+      node.normalized_title = newTitle;
+
+      if (node.block_id && blockById[node.block_id]) {
+        const block = blockById[node.block_id];
+        block.text_preview = newTitle;
+        if (block.xml) {
+          block.xml = updateHeadingXml(block.xml, newPrefix, false) || block.xml;
+        }
+      }
+    }
+  }
+}
+
 function normalizePartTwo(
   gtChapter: ParsedGtChapter
 ): [BlockNode[], OutlineNode[]] {
@@ -121,6 +231,8 @@ function normalizePartTwo(
       partTwoBlocks = partTwoBlocks.slice(firstIndex);
     }
   }
+
+  renumberOutlineAndBlocks(partTwoBlocks, normalizedOutline);
 
   return [partTwoBlocks, normalizedOutline];
 }

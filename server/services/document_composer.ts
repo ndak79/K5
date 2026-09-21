@@ -4,9 +4,6 @@ import { GeneratedInsertion, LessonDocumentModel } from "./normalizer";
 import { buildInsertedParagraphXml, inheritStyle } from "./style_inheritance";
 import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 
-function buildContentTitleText(): string {
-  return "NỘI DUNG";
-}
 
 export function buildConclusionTitleBlock(
   lesson: LessonDocumentModel,
@@ -101,25 +98,112 @@ function uppercaseLessonTitle(blocks: BlockNode[]): BlockNode[] {
   return blocks.map((block, index) => (index === titleIndex ? uppercaseTextBlock(block) : block));
 }
 
+function buildContentTitleWithMinutesXml(
+  minutesText: string,
+  style: ReturnType<typeof inheritStyle>
+): string {
+  const doc = new DOMParser().parseFromString(
+    '<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"></w:p>',
+    "text/xml"
+  );
+  const paragraph = doc.documentElement;
+
+  let pPr: any;
+  if (style.paragraph_properties_xml) {
+    const tempDoc = new DOMParser().parseFromString(style.paragraph_properties_xml, "text/xml");
+    pPr = doc.importNode(tempDoc.documentElement, true);
+  } else {
+    pPr = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:pPr");
+  }
+
+  const pb = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:pageBreakBefore");
+  pPr.appendChild(pb);
+
+  let jc = pPr.getElementsByTagName("w:jc")[0];
+  if (!jc) {
+    jc = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:jc");
+    pPr.appendChild(jc);
+  }
+  jc.setAttributeNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:val", "center");
+  paragraph.appendChild(pPr);
+
+  const r1 = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:r");
+  let rPr1: any;
+  if (style.run_properties_xml) {
+    const tempDoc = new DOMParser().parseFromString(style.run_properties_xml, "text/xml");
+    rPr1 = doc.importNode(tempDoc.documentElement, true);
+  } else {
+    rPr1 = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:rPr");
+  }
+  const b = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:b");
+  const bCs = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:bCs");
+  rPr1.appendChild(b);
+  rPr1.appendChild(bCs);
+  r1.appendChild(rPr1);
+
+  const t1 = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:t");
+  t1.textContent = "NỘI DUNG";
+  r1.appendChild(t1);
+  paragraph.appendChild(r1);
+
+  const r2 = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:r");
+  const t2 = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:t");
+  t2.setAttributeNS("http://www.w3.org/XML/1998/namespace", "xml:space", "preserve");
+  t2.textContent = " ";
+  r2.appendChild(t2);
+  paragraph.appendChild(r2);
+
+  const r3 = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:r");
+  let rPr3: any;
+  if (style.run_properties_xml) {
+    const tempDoc = new DOMParser().parseFromString(style.run_properties_xml, "text/xml");
+    rPr3 = doc.importNode(tempDoc.documentElement, true);
+  } else {
+    rPr3 = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:rPr");
+  }
+  const i = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:i");
+  const iCs = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:iCs");
+  rPr3.appendChild(i);
+  rPr3.appendChild(iCs);
+  r3.appendChild(rPr3);
+
+  const t3 = doc.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:t");
+  t3.textContent = minutesText;
+  r3.appendChild(t3);
+  paragraph.appendChild(r3);
+
+  return new XMLSerializer().serializeToString(doc.documentElement);
+}
+
 export function buildContentTitleBlock(
   lesson: LessonDocumentModel,
   referenceBlock: BlockNode | null,
   orderIndex: number
 ): BlockNode {
   const style = inheritStyle(referenceBlock);
-  const titleText = buildContentTitleText();
+  const totalMinutes = lesson.cdr_lesson?.schedule_items?.reduce(
+    (sum, item) => sum + (item.duration_minutes || 0),
+    0
+  ) || 0;
+  const titleText = totalMinutes > 0 ? `NỘI DUNG (${totalMinutes} phút)` : "NỘI DUNG";
+  let xml: string;
+  if (totalMinutes > 0) {
+    xml = buildContentTitleWithMinutesXml(`(${totalMinutes} phút)`, style);
+  } else {
+    xml = buildInsertedParagraphXml(titleText, style, {
+      italic: false,
+      bold: true,
+      align: "center",
+      page_break_before: true
+    });
+  }
 
   return {
     id: "generated-content-title",
     kind: "inserted_paragraph",
     source: "generated",
     text_preview: titleText,
-    xml: buildInsertedParagraphXml(titleText, style, {
-      italic: false,
-      bold: true,
-      align: "center",
-      page_break_before: true
-    }),
+    xml,
     order_index: orderIndex
   };
 }

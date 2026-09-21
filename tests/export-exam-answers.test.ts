@@ -113,3 +113,82 @@ test("exports exam answers DOCX matching table structure and Times New Roman fon
     }
   }
 });
+
+test("exports questions-only DOCX containing only Level 3 questions and not answers or CLO matrix", () => {
+  const sampleAnswer: ExamAnswerModel = {
+    questionNumber: 1,
+    questionText: "Khái niệm quá trình huấn luyện quân nhân",
+    totalScore: "5,0đ",
+    introduction: { title: "* Đặt vấn đề", score: "0,25đ" },
+    part1: { title: "Ý 1: Lý luận", score: "2,5đ", items: [{ content: "Nội dung ý 1", score: "2,5" }] },
+    part2: { title: "Ý 2: Vận dụng", score: "2,0đ", items: [{ content: "Nội dung ý 2", score: "2,0" }] },
+    conclusion: { title: "* Kết luận", score: "0,25đ" },
+    clos: ["1.1", "2.2"],
+    levels: {
+      easy: "Nêu khái niệm quá trình huấn luyện quân nhân.",
+      medium: "Trình bày khái niệm quá trình huấn luyện quân nhân. Rút ra ý nghĩa đối với bản thân.",
+      hard: "Phân tích khái niệm quá trình huấn luyện quân nhân. Ý nghĩa vận dụng đối với người cán bộ phân đội."
+    }
+  };
+
+  const clos: CloDefinition[] = [{ code: "1.1", text: "Phẩm chất chính trị" }];
+  const outputPath = path.join(os.tmpdir(), `k5-test-questions-only-${Date.now()}.docx`);
+
+  try {
+    exportExamAnswersDocx([sampleAnswer], clos, outputPath, "File demo Bien soan CH,DA.docx", { mode: "questions" });
+    assert.ok(fs.existsSync(outputPath));
+
+    const zip = new AdmZip(outputPath);
+    const docXml = zip.readAsText("word/document.xml");
+    assert.ok(docXml.includes("NGÂN HÀNG CÂU HỎI MÔN HỌC"));
+    assert.ok(docXml.includes("1. Dễ: Nêu khái niệm"));
+    assert.ok(docXml.includes("2. Trung bình: Trình bày"));
+    assert.ok(docXml.includes("3. Khó: Phân tích"));
+    // Must NOT contain answers table or CLO matrix
+    assert.equal(docXml.includes("Đặt vấn đề"), false);
+    assert.equal(docXml.includes("Ý 1: Lý luận"), false);
+    assert.equal(docXml.includes("Ma trận biểu thị sự phù hợp"), false);
+  } finally {
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+  }
+});
+
+test("exports answers-only DOCX containing Phần I and Phần II and not Level 3 questions", () => {
+  const sampleAnswer: ExamAnswerModel = {
+    questionNumber: 1,
+    questionText: "Khái niệm quá trình huấn luyện quân nhân",
+    totalScore: "5,0đ",
+    introduction: { title: "* Đặt vấn đề hợp lý", score: "0,25đ" },
+    part1: { title: "Ý 1: Lý luận cơ bản", score: "2,5đ", items: [{ content: "Nội dung ý 1", score: "2,5" }] },
+    part2: { title: "Ý 2: Ý nghĩa vận dụng", score: "2,0đ", items: [{ content: "Nội dung ý 2", score: "2,0" }] },
+    conclusion: { title: "* Phương pháp trình bày", score: "0,25đ" },
+    clos: ["1.1", "2.2"],
+    levels: {
+      easy: "Nêu khái niệm.",
+      medium: "Trình bày khái niệm.",
+      hard: "Phân tích khái niệm."
+    }
+  };
+
+  const clos: CloDefinition[] = [{ code: "1.1", text: "Phẩm chất chính trị" }];
+  const outputPath = path.join(os.tmpdir(), `k5-test-answers-only-${Date.now()}.docx`);
+
+  try {
+    exportExamAnswersDocx([sampleAnswer], clos, outputPath, "File demo Bien soan CH,DA.docx", { mode: "answers" });
+    assert.ok(fs.existsSync(outputPath));
+
+    const zip = new AdmZip(outputPath);
+    const docXml = zip.readAsText("word/document.xml");
+    assert.ok(docXml.includes("NGÂN HÀNG ĐÁP ÁN VÀ MA TRẬN MÔN HỌC"));
+    assert.ok(docXml.includes("Đặt vấn đề hợp lý"));
+    assert.ok(docXml.includes("Ý 1: Lý luận cơ bản"));
+    assert.ok(docXml.includes("Ý 2: Ý nghĩa vận dụng"));
+    assert.ok(docXml.includes("Ma trận biểu thị sự phù hợp"));
+    // Must NOT contain 3 levels questions
+    assert.equal(docXml.includes("1. Dễ:"), false);
+    assert.equal(docXml.includes("2. Trung bình:"), false);
+    assert.equal(docXml.includes("3. Khó:"), false);
+  } finally {
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+  }
+});

@@ -6,7 +6,7 @@ import { DOMParser } from "@xmldom/xmldom";
 import { normalizeInputDocument } from "../document_pipeline/convert";
 import { parseGtDocument, ParsedGtDocument } from "../document_pipeline/parse_gt";
 import { createOpenAICompatibleClient, DEFAULT_AI_MODEL, OpenAICompatibleClient } from "./openai_compatible_client";
-import { exportExamAnswersDocx, ExamAnswerModel, CloDefinition, AnswerSubItem } from "../document_pipeline/export_exam_answers_docx";
+import { exportExamAnswersDocx, ExamAnswerModel, CloDefinition, AnswerSubItem, ExportExamAnswersOptions } from "../document_pipeline/export_exam_answers_docx";
 
 export interface ExamQuestionItem {
   number: number;
@@ -636,7 +636,7 @@ export function updateQuestionAnswer(questionNumber: number, answer: ExamAnswerM
   return getExamAnswerSummary();
 }
 
-export function compileExamAnswersDocx(outputPath: string): string {
+export function compileExamAnswersDocx(outputPath: string, options?: ExportExamAnswersOptions): string {
   const answers: ExamAnswerModel[] = examAnswerRuntime.questions
     .map((q) => q.answer)
     .filter((a): a is ExamAnswerModel => a !== null);
@@ -649,6 +649,7 @@ export function compileExamAnswersDocx(outputPath: string): string {
     answers,
     examAnswerRuntime.clos,
     outputPath,
-    examAnswerRuntime.cdr_original_path || undefined
+    examAnswerRuntime.cdr_original_path || undefined,
+    options
   );
 }

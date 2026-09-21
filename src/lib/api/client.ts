@@ -469,8 +469,9 @@ export async function resetExamAnswersSession(): Promise<ExamAnswerSessionSummar
   return payload.session;
 }
 
-export async function exportExamAnswersDocxBlob(): Promise<Blob> {
-  const response = await fetch(`${API_BASE_URL}/api/exam-answers/export`, {
+export async function exportExamAnswersDocxBlob(mode?: "all" | "questions" | "answers"): Promise<Blob> {
+  const url = mode ? `${API_BASE_URL}/api/exam-answers/export?mode=${mode}` : `${API_BASE_URL}/api/exam-answers/export`;
+  const response = await fetch(url, {
     method: "POST"
   });
   if (!response.ok) {

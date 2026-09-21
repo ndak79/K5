@@ -44,6 +44,11 @@ export interface CloDefinition {
   text: string;
 }
 
+export interface ExportExamAnswersOptions {
+  mode?: "all" | "questions" | "answers";
+  title?: string;
+}
+
 function escapeXml(unsafe: string): string {
   if (!unsafe) return "";
   return unsafe
@@ -286,8 +291,10 @@ export function exportExamAnswersDocx(
   answers: ExamAnswerModel[],
   clos: CloDefinition[],
   outputPath: string,
-  basePackagePath?: string
+  basePackagePath?: string,
+  options?: ExportExamAnswersOptions
 ): string {
+  const mode = options?.mode || "all";
   let baseZip: AdmZip;
   const defaultBaseCandidates = [
     basePackagePath,
@@ -332,9 +339,14 @@ export function exportExamAnswersDocx(
   }
 
   // 1. Header Title
+  let docTitle = "NGÂN HÀNG CÂU HỎI VÀ ĐÁP ÁN MÔN HỌC";
+  if (mode === "questions") {
+    docTitle = "NGÂN HÀNG CÂU HỎI MÔN HỌC";
+  } else if (mode === "answers") {
+    docTitle = "NGÂN HÀNG ĐÁP ÁN VÀ MA TRẬN MÔN HỌC";
+  }
   const titleP1 = buildParagraphXml("BỘ MÔN TÂM LÝ - GIÁO DỤC HỌC QUÂN SỰ", { bold: true, align: "center", size: 26, spacingAfter: 80 });
-  const titleP2 = buildParagraphXml("NGÂN HÀNG CÂU HỎI VÀ ĐÁP ÁN MÔN HỌC", { bold: true, align: "center", size: 30, spacingAfter: 160 });
-  const section1H = buildParagraphXml("* Câu hỏi, đáp án", { bold: true, align: "both", size: 28, spacingBefore: 120, spacingAfter: 120 });
+  const titleP2 = buildParagraphXml(docTitle, { bold: true, align: "center", size: 30, spacingAfter: 160 });
 
   const appendXmlFragment = (xmlStr: string) => {
     const fragmentDoc = new DOMParser().parseFromString(`<root xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${xmlStr}</root>`, "text/xml");
@@ -347,56 +359,61 @@ export function exportExamAnswersDocx(
 
   appendXmlFragment(titleP1);
   appendXmlFragment(titleP2);
-  appendXmlFragment(section1H);
 
-  // 2. Question Tables
-  for (let i = 0; i < answers.length; i++) {
-    const ans = answers[i];
-    const tblXml = buildQuestionTableXml(ans);
-    appendXmlFragment(tblXml);
-    appendXmlFragment(`<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:pPr><w:spacing w:before="160" w:after="160"/></w:pPr></w:p>`);
-  }
+  // 1 & 2: Phần I (Câu hỏi, đáp án) & Phần II (Ma trận CLO) - for "all" or "answers"
+  if (mode === "all" || mode === "answers") {
+    const section1H = buildParagraphXml("* Câu hỏi, đáp án", { bold: true, align: "both", size: 28, spacingBefore: 120, spacingAfter: 120 });
+    appendXmlFragment(section1H);
 
-  // 3. CLO Matrix
-  if (clos.length > 0 && answers.length > 0) {
-    const matrixHeader = buildParagraphXml("* Ma trận biểu thị sự phù hợp giữa ngân hàng câu hỏi-đáp án và chuẩn đầu ra (CLO)", {
-      bold: true,
-      align: "both",
-      size: 28,
-      spacingBefore: 240,
-      spacingAfter: 140
-    });
-    appendXmlFragment(matrixHeader);
-    const matrixTableXml = buildCloMatrixTableXml(answers, clos);
-    if (matrixTableXml) {
-      appendXmlFragment(matrixTableXml);
+    for (let i = 0; i < answers.length; i++) {
+      const ans = answers[i];
+      const tblXml = buildQuestionTableXml(ans);
+      appendXmlFragment(tblXml);
       appendXmlFragment(`<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:pPr><w:spacing w:before="160" w:after="160"/></w:pPr></w:p>`);
+    }
+
+    if (clos.length > 0 && answers.length > 0) {
+      const matrixHeader = buildParagraphXml("* Ma trận biểu thị sự phù hợp giữa ngân hàng câu hỏi-đáp án và chuẩn đầu ra (CLO)", {
+        bold: true,
+        align: "both",
+        size: 28,
+        spacingBefore: 240,
+        spacingAfter: 140
+      });
+      appendXmlFragment(matrixHeader);
+      const matrixTableXml = buildCloMatrixTableXml(answers, clos);
+      if (matrixTableXml) {
+        appendXmlFragment(matrixTableXml);
+        appendXmlFragment(`<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:pPr><w:spacing w:before="160" w:after="160"/></w:pPr></w:p>`);
+      }
     }
   }
 
-  // 4. Questions by 3 Levels
-  const hasLevels = answers.some(a => a.levels && (a.levels.easy || a.levels.medium || a.levels.hard));
-  if (hasLevels) {
-    const levelsHeader = buildParagraphXml("* Các câu hỏi ở 3 mức độ (Dễ, Trung bình, Khó)", {
-      bold: true,
-      align: "both",
-      size: 28,
-      spacingBefore: 240,
-      spacingAfter: 140
-    });
-    appendXmlFragment(levelsHeader);
+  // 3: Questions by 3 Levels - for "all" or "questions"
+  if (mode === "all" || mode === "questions") {
+    const hasLevels = answers.some(a => a.levels && (a.levels.easy || a.levels.medium || a.levels.hard));
+    if (hasLevels) {
+      const levelsHeader = buildParagraphXml("* Các câu hỏi ở 3 mức độ (Dễ, Trung bình, Khó)", {
+        bold: true,
+        align: "both",
+        size: 28,
+        spacingBefore: mode === "questions" ? 80 : 240,
+        spacingAfter: 140
+      });
+      appendXmlFragment(levelsHeader);
 
-    for (const ans of answers) {
-      if (!ans.levels) continue;
-      appendXmlFragment(buildParagraphXml(`Câu ${ans.questionNumber}:`, { bold: true, size: 28, spacingBefore: 100, spacingAfter: 40 }));
-      if (ans.levels.easy) {
-        appendXmlFragment(buildParagraphXml(`1. Dễ: ${ans.levels.easy}`, { size: 26, spacingBefore: 20, spacingAfter: 20 }));
-      }
-      if (ans.levels.medium) {
-        appendXmlFragment(buildParagraphXml(`2. Trung bình: ${ans.levels.medium}`, { size: 26, spacingBefore: 20, spacingAfter: 20 }));
-      }
-      if (ans.levels.hard) {
-        appendXmlFragment(buildParagraphXml(`3. Khó: ${ans.levels.hard}`, { size: 26, spacingBefore: 20, spacingAfter: 40 }));
+      for (const ans of answers) {
+        if (!ans.levels) continue;
+        appendXmlFragment(buildParagraphXml(`Câu ${ans.questionNumber}:`, { bold: true, size: 28, spacingBefore: 100, spacingAfter: 40 }));
+        if (ans.levels.easy) {
+          appendXmlFragment(buildParagraphXml(`1. Dễ: ${ans.levels.easy}`, { size: 26, spacingBefore: 20, spacingAfter: 20 }));
+        }
+        if (ans.levels.medium) {
+          appendXmlFragment(buildParagraphXml(`2. Trung bình: ${ans.levels.medium}`, { size: 26, spacingBefore: 20, spacingAfter: 20 }));
+        }
+        if (ans.levels.hard) {
+          appendXmlFragment(buildParagraphXml(`3. Khó: ${ans.levels.hard}`, { size: 26, spacingBefore: 20, spacingAfter: 40 }));
+        }
       }
     }
   }

@@ -438,9 +438,16 @@ app.post("/api/exam-answers/reset", (req: Request, res: Response) => {
 // POST compile and export exam answers docx
 app.post("/api/exam-answers/export", (req: Request, res: Response) => {
   try {
-    const tempFile = path.join(os.tmpdir(), `dap_an_cau_hoi_${Date.now()}.docx`);
-    compileExamAnswersDocx(tempFile);
-    res.download(tempFile, "Dap_An_Va_Thang_Diem_Cau_Hoi.docx", (err) => {
+    const mode = (req.query.mode || req.body?.mode || "all") as "all" | "questions" | "answers";
+    const tempFile = path.join(os.tmpdir(), `dap_an_cau_hoi_${mode}_${Date.now()}.docx`);
+    compileExamAnswersDocx(tempFile, { mode });
+    let filename = "Dap_An_Va_Thang_Diem_Cau_Hoi.docx";
+    if (mode === "questions") {
+      filename = "Ngan_Hang_Cau_Hoi_3_Muc_Do.docx";
+    } else if (mode === "answers") {
+      filename = "Ngan_Hang_Dap_An_Va_Ma_Tran.docx";
+    }
+    res.download(tempFile, filename, (err) => {
       try {
         if (path.resolve(tempFile).startsWith(os.tmpdir())) {
           path.resolve(tempFile) && fs.existsSync(tempFile) && fs.unlinkSync(tempFile);

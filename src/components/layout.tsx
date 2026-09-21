@@ -17,6 +17,7 @@ export function Layout({
   const location = useLocation();
   const isHome = location.pathname === "/";
   const isBloomOptimize = location.pathname === "/bloom-optimize";
+  const isQuestionBank = location.pathname === "/question-bank";
   const isExamAnswers = location.pathname === "/exam-answers";
 
   return (
@@ -48,13 +49,8 @@ export function Layout({
                   }`}
                 >
                   <span className="material-symbols-outlined text-[18px]">dashboard</span>
-                  <span>Trang chủ</span>
+                  <span>Biên soạn Bài giảng</span>
                 </Link>
-
-                <div className="flex items-center space-x-2 px-3.5 py-2 rounded-xl text-sm text-ink/40 cursor-not-allowed select-none">
-                  <span className="material-symbols-outlined text-[18px]">menu_book</span>
-                  <span>Khung CDR</span>
-                </div>
 
                 <Link
                   to="/bloom-optimize"
@@ -65,7 +61,19 @@ export function Layout({
                   }`}
                 >
                   <span className="material-symbols-outlined text-[18px]">rule_folder</span>
-                  <span>Tối ưu Bloom CDR</span>
+                  <span>Chuẩn hóa CĐR</span>
+                </Link>
+
+                <Link
+                  to="/question-bank"
+                  className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-sm font-medium transition-colors ${
+                    isQuestionBank
+                      ? "bg-sage-hover text-accent shadow-xs"
+                      : "text-ink/80 hover:bg-sage-hover/50 hover:text-accent"
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[18px]">quiz</span>
+                  <span>Xây dựng Ngân hàng câu hỏi</span>
                 </Link>
 
                 <Link
@@ -76,8 +84,8 @@ export function Layout({
                       : "text-ink/80 hover:bg-sage-hover/50 hover:text-accent"
                   }`}
                 >
-                  <span className="material-symbols-outlined text-[18px]">quiz</span>
-                  <span>Tạo đáp án</span>
+                  <span className="material-symbols-outlined text-[18px]">fact_check</span>
+                  <span>Xây dựng Đáp án</span>
                 </Link>
               </div>
             </div>
@@ -89,7 +97,7 @@ export function Layout({
                 className={`p-2 rounded-xl flex items-center justify-center transition-all ${
                   isHome ? "text-accent bg-accent/10" : "text-ink/75 hover:bg-sage-hover"
                 }`}
-                title="Trang chủ"
+                title="Biên soạn Bài giảng"
               >
                 <span className="material-symbols-outlined text-lg leading-none">dashboard</span>
               </Link>
@@ -98,18 +106,27 @@ export function Layout({
                 className={`p-2 rounded-xl flex items-center justify-center transition-all ${
                   isBloomOptimize ? "text-accent bg-accent/10" : "text-ink/75 hover:bg-sage-hover"
                 }`}
-                title="Tối ưu Bloom CDR"
+                title="Chuẩn hóa CĐR"
               >
                 <span className="material-symbols-outlined text-lg leading-none">rule_folder</span>
+              </Link>
+              <Link
+                to="/question-bank"
+                className={`p-2 rounded-xl flex items-center justify-center transition-all ${
+                  isQuestionBank ? "text-accent bg-accent/10" : "text-ink/75 hover:bg-sage-hover"
+                }`}
+                title="Xây dựng Ngân hàng câu hỏi"
+              >
+                <span className="material-symbols-outlined text-lg leading-none">quiz</span>
               </Link>
               <Link
                 to="/exam-answers"
                 className={`p-2 rounded-xl flex items-center justify-center transition-all ${
                   isExamAnswers ? "text-accent bg-accent/10" : "text-ink/75 hover:bg-sage-hover"
                 }`}
-                title="Tạo đáp án"
+                title="Xây dựng Đáp án"
               >
-                <span className="material-symbols-outlined text-lg leading-none">quiz</span>
+                <span className="material-symbols-outlined text-lg leading-none">fact_check</span>
               </Link>
             </div>
           </div>

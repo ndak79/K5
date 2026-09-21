@@ -1,6 +1,6 @@
 import { BlockNode, OutlineNode, ParsedGtChapter, normalizeTextKey } from "../document_pipeline/parse_gt";
 import { Anchor } from "./anchor_locator";
-import { LessonDocumentModel, GeneratedInsertion } from "./normalizer";
+import { LessonDocumentModel, GeneratedInsertion, toRoman } from "./normalizer";
 import { buildLessonContext, LessonContextPayload } from "./lesson_context_builder";
 import { inheritStyle, buildInsertedParagraphXml } from "./style_inheritance";
 import {
@@ -227,20 +227,293 @@ function contentBlocksForOutline(lesson: LessonDocumentModel, outline: OutlineNo
   return list.filter((b) => b.kind === "paragraph" && b.text_preview.trim().length > 0 && !headingsSet.has(b.id));
 }
 
-function resolveDurationText(lesson: LessonDocumentModel, anchor: Anchor): string {
-  const outline = findOutlineForAnchor(lesson, anchor);
-  if (!outline) return "";
-  const match = outline.normalized_title.match(/^([I|V|X|L|C]+|\d+)\s*\.?\s*(.+)$/i);
-  if (!match) return "";
-  const headerSymbol = match[1].trim();
+export const CANONICAL_METHODS_ORDER = [
+  "Thuyết trình",
+  "Trực quan",
+  "Đàm thoại",
+  "Nêu vấn đề",
+  "Thảo luận nhóm",
+  "Lớp học đảo ngược",
+  "Hướng dẫn nghiên cứu",
+  "Thực hành"
+];
+
+export function formatMethodDisplay(methods: string[]): string {
+  if (methods.length === 0) {
+    return "Phương pháp: Thuyết trình, trực quan, đàm thoại, hướng dẫn nghiên cứu.";
+  }
+  const formatted = methods.map((m, idx) => {
+    if (idx === 0) {
+      return m.charAt(0).toUpperCase() + m.slice(1);
+    }
+    return m.toLowerCase();
+  });
+  return `Phương pháp: ${formatted.join(", ")}.`;
+}
+
+export function calculateAllocatedDurations(lesson: LessonDocumentModel): Record<string, number> {
+  const result: Record<string, number> = {};
+  const outlines = lesson.gt_chapter.outline;
+  const level1Nodes = outlines.filter((o) => o.level === 1);
+
+  for (let l1Idx = 0; l1Idx < level1Nodes.length; l1Idx++) {
+    const l1 = level1Nodes[l1Idx];
+    const roman = toRoman(l1Idx + 1);
+    const item = lesson.cdr_lesson.schedule_items.find(
+      (si) => si.section_code && si.section_code.toUpperCase() === roman
+    );
+    const l1Minutes = item?.duration_minutes || 0;
+    if (l1Minutes > 0) {
+      result[l1.id] = l1Minutes;
+    }
+
+    const l1Pos = outlines.findIndex((o) => o.id === l1.id);
+    const nextL1Pos = outlines.findIndex((o, idx) => idx > l1Pos && o.level === 1);
+    const endPos = nextL1Pos === -1 ? outlines.length : nextL1Pos;
+
+    const l2Children = outlines.slice(l1Pos + 1, endPos).filter((o) => o.level === 2);
+    if (l2Children.length === 0) continue;
+
+    if (l1Minutes <= 0) {
+      for (const l2 of l2Children) {
+        result[l2.id] = 10;
+      }
+      continue;
+    }
+
+    if (l2Children.length === 1) {
+      result[l2Children[0].id] = l1Minutes;
+      continue;
+    }
+
+    const weights: number[] = [];
+    for (const l2 of l2Children) {
+      const blocks = contentBlocksForOutline(lesson, l2);
+      const charCount = blocks.reduce((sum, b) => sum + b.text_preview.trim().length, 0);
+      weights.push(Math.max(charCount, 100));
+    }
+
+    const totalWeight = weights.reduce((a, b) => a + b, 0);
+
+    if (l1Minutes >= 15) {
+      const shares = weights.map((w) => Math.max(5, Math.round(((w / totalWeight) * l1Minutes) / 5) * 5));
+      let sumShares = shares.reduce((a, b) => a + b, 0);
+      let diff = l1Minutes - sumShares;
+
+      let loopCount = 0;
+      while (diff !== 0 && loopCount < 20) {
+        loopCount++;
+        if (diff > 0) {
+          let maxIdx = 0;
+          for (let i = 1; i < weights.length; i++) {
+            if (weights[i] > weights[maxIdx]) maxIdx = i;
+          }
+          shares[maxIdx] += 5;
+          diff -= 5;
+        } else {
+          let candidateIdx = -1;
+          for (let i = 0; i < shares.length; i++) {
+            if (shares[i] > 5) {
+              if (candidateIdx === -1 || shares[i] > shares[candidateIdx]) {
+                candidateIdx = i;
+              }
+            }
+          }
+          if (candidateIdx !== -1) {
+            shares[candidateIdx] -= 5;
+            diff += 5;
+          } else {
+            break;
+          }
+        }
+      }
+      if (diff !== 0) {
+        shares[0] += diff;
+      }
+      for (let i = 0; i < l2Children.length; i++) {
+        result[l2Children[i].id] = shares[i];
+      }
+    } else {
+      const shares = weights.map((w) => Math.max(1, Math.round((w / totalWeight) * l1Minutes)));
+      let sumShares = shares.reduce((a, b) => a + b, 0);
+      let diff = l1Minutes - sumShares;
+      if (diff !== 0) {
+        shares[0] += diff;
+      }
+      for (let i = 0; i < l2Children.length; i++) {
+        result[l2Children[i].id] = shares[i];
+      }
+    }
+  }
+
+  return result;
+}
+
+function extractCdrMethods(lesson: LessonDocumentModel, outline: OutlineNode): string[] {
+  const outlines = lesson.gt_chapter.outline;
+  const idx = outlines.findIndex((o) => o.id === outline.id);
+  if (idx === -1) return [];
+
+  let l1 = outline;
+  if (outline.level > 1) {
+    for (let i = idx; i >= 0; i--) {
+      if (outlines[i].level === 1) {
+        l1 = outlines[i];
+        break;
+      }
+    }
+  }
+
+  const romanMatch = l1.normalized_title.match(/^([IVXLC]+)\./i);
+  if (!romanMatch) return [];
+  const roman = romanMatch[1].toUpperCase();
 
   const item = lesson.cdr_lesson.schedule_items.find(
-    (si) => si.section_code && outline.normalized_title.startsWith(`${si.section_code}.`)
+    (si) => si.section_code && si.section_code.toUpperCase() === roman
   );
-  if (!item || !item.duration_minutes) return "";
+  if (!item || !item.original_methods) return [];
 
-  const formattedSymbol = /^[IVXLC]+$/i.test(headerSymbol) ? `Phần ${headerSymbol}` : `Mục ${headerSymbol}`;
-  return `${formattedSymbol} giảng dạy trong ${item.duration_minutes} phút.`;
+  const rawMethods = item.original_methods.join(" ").toLowerCase();
+  const matched: string[] = [];
+
+  if (rawMethods.includes("thuyết trình") || rawMethods.includes("thuyet trinh")) matched.push("Thuyết trình");
+  if (rawMethods.includes("trực quan") || rawMethods.includes("truc quan")) matched.push("Trực quan");
+  if (rawMethods.includes("đàm thoại") || rawMethods.includes("dam thoai")) matched.push("Đàm thoại");
+  if (rawMethods.includes("nêu vấn đề") || rawMethods.includes("neu van de")) matched.push("Nêu vấn đề");
+  if (rawMethods.includes("thảo luận") || rawMethods.includes("thao luan")) matched.push("Thảo luận nhóm");
+  if (rawMethods.includes("đảo ngược") || rawMethods.includes("dao nguoc")) matched.push("Lớp học đảo ngược");
+  if (rawMethods.includes("nghiên cứu") || rawMethods.includes("hd") || rawMethods.includes("hướng dẫn")) matched.push("Hướng dẫn nghiên cứu");
+  if (rawMethods.includes("thực hành") || rawMethods.includes("thuc hanh")) matched.push("Thực hành");
+
+  return matched;
+}
+
+function scoreMethodsForContent(text: string, cdrMethods: string[]): string[] {
+  const norm = normalizeTextKey(text);
+  const scores: Record<string, number> = {};
+  for (const m of CANONICAL_METHODS_ORDER) {
+    scores[m] = cdrMethods.includes(m) ? 3 : 0;
+  }
+
+  const keywordRules: Record<string, string[]> = {
+    "Thuyết trình": ["khai niem", "dinh nghia", "ban chat", "dac diem", "nguyen tac", "co so", "ly luan", "chuc nang", "noi dung co ban", "y nghia", "vai tro", "tong quan", "so luoc"],
+    "Trực quan": ["truc quan", "so do", "bang bieu", "hinh anh", "mo hinh", "trinh chieu", "bieu do", "quan sat"],
+    "Đàm thoại": ["dam thoai", "hoi dap", "trao doi", "cau hoi", "tai sao", "the nao", "lam ro", "yeu cau", "lien he"],
+    "Nêu vấn đề": ["neu van de", "van de", "tinh huong", "mau thuan", "giai quyet", "xu ly", "thach thuc"],
+    "Thảo luận nhóm": ["thao luan", "nhom", "to", "tranh luan", "y kien", "dong gop", "phan bien"],
+    "Lớp học đảo ngược": ["dao nguoc", "chuan bi truoc", "doc truoc", "tu hoc truoc"],
+    "Hướng dẫn nghiên cứu": ["nghien cuu", "tai lieu", "tu hoc", "doc them", "sach", "tham khao", "tim hieu"],
+    "Thực hành": ["thuc hanh", "luyen tap", "dien tap", "dong vai", "ky nang", "thao tac"]
+  };
+
+  for (const [method, kws] of Object.entries(keywordRules)) {
+    for (const kw of kws) {
+      if (norm.includes(kw)) {
+        scores[method] += 2;
+      }
+    }
+  }
+
+  const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const picked = sorted.filter((entry) => entry[1] > 0).map((entry) => entry[0]);
+
+  if (picked.length === 0) {
+    return cdrMethods.length > 0 ? cdrMethods : ["Thuyết trình", "Trực quan", "Đàm thoại", "Hướng dẫn nghiên cứu"];
+  }
+
+  return picked.slice(0, 3);
+}
+
+export function calculateHierarchicalMethods(lesson: LessonDocumentModel): Record<string, string[]> {
+  const result: Record<string, string[]> = {};
+  const outlines = lesson.gt_chapter.outline;
+
+  const level3Methods: Record<string, string[]> = {};
+  for (const node of outlines) {
+    if (node.level === 3) {
+      const blocks = contentBlocksForOutline(lesson, node);
+      const text = blocks.map((b) => b.text_preview).join(" ");
+      const cdrMethods = extractCdrMethods(lesson, node);
+      level3Methods[node.id] = scoreMethodsForContent(text, cdrMethods);
+      result[node.id] = level3Methods[node.id];
+    }
+  }
+
+  const level2Nodes = outlines.filter((o) => o.level === 2);
+  for (const l2 of level2Nodes) {
+    const l2Pos = outlines.findIndex((o) => o.id === l2.id);
+    const nextHigherPos = outlines.findIndex((o, idx) => idx > l2Pos && (o.level === 1 || o.level === 2));
+    const endPos = nextHigherPos === -1 ? outlines.length : nextHigherPos;
+
+    const l3Children = outlines.slice(l2Pos + 1, endPos).filter((o) => o.level === 3);
+
+    if (l3Children.length > 0) {
+      const methodSet = new Set<string>();
+      for (const ch of l3Children) {
+        for (const m of level3Methods[ch.id] || []) {
+          methodSet.add(m);
+        }
+      }
+      const sorted = CANONICAL_METHODS_ORDER.filter((m) => methodSet.has(m));
+      result[l2.id] = sorted.length > 0 ? sorted : ["Thuyết trình", "Trực quan", "Đàm thoại", "Hướng dẫn nghiên cứu"];
+    } else {
+      const blocks = contentBlocksForOutline(lesson, l2);
+      const text = blocks.map((b) => b.text_preview).join(" ");
+      const cdrMethods = extractCdrMethods(lesson, l2);
+      const scored = scoreMethodsForContent(text, cdrMethods);
+      const sorted = CANONICAL_METHODS_ORDER.filter((m) => scored.includes(m));
+      result[l2.id] = sorted.length > 0 ? sorted : ["Thuyết trình", "Trực quan", "Đàm thoại", "Hướng dẫn nghiên cứu"];
+    }
+  }
+
+  const level1Nodes = outlines.filter((o) => o.level === 1);
+  for (const l1 of level1Nodes) {
+    const l1Pos = outlines.findIndex((o) => o.id === l1.id);
+    const nextL1Pos = outlines.findIndex((o, idx) => idx > l1Pos && o.level === 1);
+    const endPos = nextL1Pos === -1 ? outlines.length : nextL1Pos;
+
+    const l2Children = outlines.slice(l1Pos + 1, endPos).filter((o) => o.level === 2);
+    const methodSet = new Set<string>();
+
+    for (const l2 of l2Children) {
+      for (const m of result[l2.id] || []) {
+        methodSet.add(m);
+      }
+    }
+
+    const cdrMethods = extractCdrMethods(lesson, l1);
+    for (const m of cdrMethods) {
+      methodSet.add(m);
+    }
+
+    const sorted = CANONICAL_METHODS_ORDER.filter((m) => methodSet.has(m));
+    result[l1.id] = sorted.length > 0 ? sorted : ["Thuyết trình", "Trực quan", "Đàm thoại", "Hướng dẫn nghiên cứu"];
+  }
+
+  return result;
+}
+
+function resolveDurationText(
+  lesson: LessonDocumentModel,
+  anchor: Anchor,
+  allocatedDurations?: Record<string, number>
+): string {
+  if (anchor.outline_id && allocatedDurations && allocatedDurations[anchor.outline_id]) {
+    return `Thời gian: ${allocatedDurations[anchor.outline_id]} phút`;
+  }
+  const outline = findOutlineForAnchor(lesson, anchor);
+  if (!outline) return "";
+  const match = outline.normalized_title.match(/^([I|V|X|L|C]+)\s*\.?\s*(.+)$/i);
+  if (match) {
+    const headerSymbol = match[1].trim();
+    const item = lesson.cdr_lesson.schedule_items.find(
+      (si) => si.section_code && si.section_code.toUpperCase() === headerSymbol.toUpperCase()
+    );
+    if (item && item.duration_minutes) {
+      return `Thời gian: ${item.duration_minutes} phút`;
+    }
+  }
+  return "";
 }
 
 function questionContextLines(lesson: LessonDocumentModel, anchor: Anchor, limit = 6): string[] {
@@ -564,6 +837,7 @@ function appendDurationInsertions(
   result: GeneratedInsertion[],
   lesson: LessonDocumentModel,
   anchor: Anchor,
+  allocatedDurations: Record<string, number>,
   referenceBlock: BlockNode | null,
   nextIndex: number
 ): number {
@@ -571,12 +845,22 @@ function appendDurationInsertions(
     return nextIndex;
   }
 
-  const text = resolveDurationText(lesson, anchor);
+  const text = resolveDurationText(lesson, anchor, allocatedDurations);
   if (!text) {
     return nextIndex;
   }
 
-  const block = paragraphBlock(anchor, referenceBlock, nextIndex, text);
+  const style = inheritStyle(referenceBlock);
+  const block: BlockNode = {
+    id: `${anchor.id}-${nextIndex}`,
+    kind: "inserted_paragraph",
+    source: "generated",
+    text_preview: text,
+    xml: buildInsertedParagraphXml(text, style, { italic: true, bold: false, align: "both" }),
+    style_ref: referenceBlock ? referenceBlock.style_ref : null,
+    anchor_ref: anchor.id,
+    order_index: nextIndex
+  };
   result.push({
     id: block.id,
     anchor_id: anchor.id,
@@ -598,9 +882,18 @@ function appendMethodInsertions(
     return nextIndex;
   }
 
-  const displayed = methods.map((m) => METHOD_DISPLAY_LABELS[m] || m);
-  const text = `Phương pháp dạy học: ${displayed.join(", ")}.`;
-  const block = paragraphBlock(anchor, referenceBlock, nextIndex, text);
+  const text = formatMethodDisplay(methods);
+  const style = inheritStyle(referenceBlock);
+  const block: BlockNode = {
+    id: `${anchor.id}-${nextIndex}`,
+    kind: "inserted_paragraph",
+    source: "generated",
+    text_preview: text,
+    xml: buildInsertedParagraphXml(text, style, { italic: true, bold: false, align: "both" }),
+    style_ref: referenceBlock ? referenceBlock.style_ref : null,
+    anchor_ref: anchor.id,
+    order_index: nextIndex
+  };
   result.push({
     id: block.id,
     anchor_id: anchor.id,
@@ -902,6 +1195,8 @@ export async function enrichLessonDocument(
   );
 
   const anchorBlockMap = buildAnchorBlockMap(lesson, activeAnchors);
+  const allocatedDurations = calculateAllocatedDurations(lesson);
+  const hierarchicalMethods = calculateHierarchicalMethods(lesson);
   const insertions: GeneratedInsertion[] = [];
   let nextIndex = lesson.part_one_blocks.length + lesson.part_two_blocks.length;
 
@@ -909,12 +1204,12 @@ export async function enrichLessonDocument(
     const referenceBlock = anchorBlockMap[anchor.id] || null;
 
     if (anchor.kind === "content_duration" || anchor.kind === "section_duration") {
-      nextIndex = appendDurationInsertions(insertions, lesson, anchor, referenceBlock, nextIndex);
+      nextIndex = appendDurationInsertions(insertions, lesson, anchor, allocatedDurations, referenceBlock, nextIndex);
       continue;
     }
 
     if (anchor.kind === "method") {
-      const methods = defaultMethodsForAnchor(lesson, anchor);
+      const methods = anchor.outline_id ? (hierarchicalMethods[anchor.outline_id] || defaultMethodsForAnchor(lesson, anchor)) : defaultMethodsForAnchor(lesson, anchor);
       nextIndex = appendMethodInsertions(insertions, anchor, methods, referenceBlock, nextIndex);
       continue;
     }

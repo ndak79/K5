@@ -14,7 +14,7 @@ export interface Anchor {
 
 function isHeadingBlock(block: BlockNode): boolean {
   const text = block.text_preview.trim();
-  return isNumericSectionHeading(text) || /^([IVXLC]+\s*\.\s|[a-z]\)\s)/i.test(text);
+  return isNumericSectionHeading(text) || /^([IVXLC]+\s*\.\s|[a-z]\)\s|\d+\s*\.\s)/i.test(text);
 }
 
 function findBlockIndex(blocks: BlockNode[], blockId: string | null): number | null {
@@ -247,7 +247,7 @@ export function locateAnchors(
     const blockId = outlineNode.block_id || defaultBlockId;
     if (!blockId) continue;
 
-    if (outlineNode.level === 1) {
+    if (outlineNode.level === 1 || outlineNode.level === 2) {
       anchors.push({
         id: `${outlineNode.id}-duration`,
         kind: "section_duration",
@@ -256,12 +256,6 @@ export function locateAnchors(
         outline_id: outlineNode.id,
         outline_level: outlineNode.level
       });
-    }
-
-    if (
-      (outlineNode.level === 1 || outlineNode.level === 2) &&
-      isNumericSectionHeading(outlineNode.normalized_title)
-    ) {
       anchors.push({
         id: `${outlineNode.id}-method`,
         kind: "method",

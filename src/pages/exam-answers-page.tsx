@@ -48,7 +48,11 @@ const EMPTY_SESSION: ExamAnswerSessionSummary = {
   questions: []
 };
 
-export function ExamAnswersPage() {
+export interface ExamAnswersPageProps {
+  mode?: "question-bank" | "exam-answers";
+}
+
+export function ExamAnswersPage({ mode = "exam-answers" }: ExamAnswersPageProps) {
   const [session, setSession] = useState<ExamAnswerSessionSummary>(EMPTY_SESSION);
   const [uploadingCdr, setUploadingCdr] = useState(false);
   const [uploadingGt, setUploadingGt] = useState(false);
@@ -177,21 +181,25 @@ export function ExamAnswersPage() {
 
   function handleExport() {
     if (session.completed_questions === 0) {
-      setFeedback({ message: "Chưa có đáp án nào được sinh để tải xuống!", type: "error" });
+      setFeedback({ message: "Chưa có câu hỏi/đáp án nào được sinh để tải xuống!", type: "error" });
       return;
     }
     setIsExporting(true);
-    exportExamAnswersDocxBlob()
+    const exportMode = mode === "question-bank" ? "questions" : "answers";
+    exportExamAnswersDocxBlob(exportMode)
       .then((blob) => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "Dap_An_Va_Thang_Diem_Cau_Hoi.docx";
+        a.download = mode === "question-bank" ? "Ngan_Hang_Cau_Hoi_3_Muc_Do.docx" : "Ngan_Hang_Dap_An_Va_Ma_Tran.docx";
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
-        setFeedback({ message: "Tải file DOCX đáp án thành công!", type: "success" });
+        setFeedback({
+          message: mode === "question-bank" ? "Tải file Ngân hàng câu hỏi thành công!" : "Tải file Đáp án & Ma trận thành công!",
+          type: "success"
+        });
       })
       .catch((err) => {
         setFeedback({ message: err.message || "Tải file thất bại", type: "error" });
@@ -238,15 +246,15 @@ export function ExamAnswersPage() {
           <div className="relative z-10 max-w-3xl space-y-3">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 text-accent font-mono text-xs font-semibold">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>AI EXAM ANSWER GENERATOR STUDIO</span>
+              <span>{mode === "question-bank" ? "HỆ THỐNG CÂU HỎI 3 MỨC ĐỘ" : "NGÂN HÀNG ĐÁP ÁN & MA TRẬN CLO"}</span>
             </div>
             <h2 className="text-2xl md:text-3xl font-black font-serif text-accent tracking-tight">
-              Xưởng Biên Soạn Câu Hỏi &amp; Đáp Án
+              {mode === "question-bank" ? "Xây dựng Ngân hàng Câu hỏi" : "Xây dựng Đáp án"}
             </h2>
             <p className="text-xs md:text-sm text-ink/70 leading-relaxed">
-              Tự động gợi ý đáp án chi tiết bám sát giáo trình học phần, phân chia ý rõ ràng theo thang điểm chuẩn 5,0đ
-              (Đặt vấn đề 0,25đ; Ý 1 lý luận 2,5đ; Ý 2 vận dụng thực tiễn 2,0đ; Trình bày 0,25đ), kèm ma trận chuẩn đầu ra CLO
-              và 3 mức độ câu hỏi.
+              {mode === "question-bank"
+                ? "Tự động trích xuất và phân hóa hệ thống câu hỏi theo 3 mức độ (Dễ, Trung bình, Khó) bám sát Chuẩn đầu ra (CLO) và Giáo trình học phần, xuất file độc lập gồm hệ thống câu hỏi 3 mức độ."
+                : "Tự động gợi ý đáp án chi tiết bám sát giáo trình học phần theo thang điểm chuẩn 5,0đ (Đặt vấn đề 0,25đ; Ý 1 lý luận 2,5đ; Ý 2 vận dụng thực tiễn 2,0đ; Trình bày 0,25đ) kèm bảng ma trận chuẩn đầu ra CLO."}
             </p>
           </div>
         </div>
@@ -436,7 +444,7 @@ export function ExamAnswersPage() {
                   className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition-all shadow-xs disabled:opacity-50 cursor-pointer"
                 >
                   {isExporting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />}
-                  <span>Tải file Đáp án (.docx)</span>
+                  <span>{mode === "question-bank" ? "Tải Ngân hàng câu hỏi (.docx)" : "Tải Bộ đáp án & Ma trận (.docx)"}</span>
                 </button>
 
                 <button
@@ -525,6 +533,16 @@ export function ExamAnswersPage() {
                         <h4 className="font-serif font-bold text-sm md:text-base text-ink leading-snug pt-1">
                           {q.question}
                         </h4>
+                        {mode === "question-bank" && hasAnswer && q.answer?.levels && (
+                          <div className="mt-3 p-3 bg-sage-light/30 rounded-xl border border-sage-border/60 text-xs space-y-1.5">
+                            <div className="font-serif font-bold text-accent text-[11px] uppercase">
+                              Hệ thống câu hỏi 3 mức độ:
+                            </div>
+                            <div className="text-ink/80"><strong className="text-accent">1. Dễ:</strong> {q.answer.levels.easy}</div>
+                            <div className="text-ink/80"><strong className="text-accent">2. Trung bình:</strong> {q.answer.levels.medium}</div>
+                            <div className="text-ink/80"><strong className="text-accent">3. Khó:</strong> {q.answer.levels.hard}</div>
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2 flex-shrink-0">
@@ -534,7 +552,7 @@ export function ExamAnswersPage() {
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent hover:bg-sage-dark text-white text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer shadow-xs"
                         >
                           {isGenerating ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                          <span>{hasAnswer ? "Sinh lại" : "Gợi ý đáp án"}</span>
+                          <span>{hasAnswer ? "Sinh lại" : (mode === "question-bank" ? "Phân rã 3 mức độ" : "Gợi ý đáp án")}</span>
                         </button>
 
                         {hasAnswer && (
@@ -858,4 +876,8 @@ export function ExamAnswersPage() {
       </div>
     </Layout>
   );
+}
+
+export function QuestionBankPage() {
+  return <ExamAnswersPage mode="question-bank" />;
 }

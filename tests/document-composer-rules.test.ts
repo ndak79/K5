@@ -9,7 +9,7 @@ import { buildLessonDiagramData } from "../server/document_pipeline/lesson_diagr
 import { CDR_FIXTURE, GT_FIXTURE } from "./fixtures";
 import * as fs from "node:fs";
 
-const NUMERIC_SECTION_HEADING = /^\s*\d+\s*(?:\.\s*\d+)+\s*[.:]?\s+\S/i;
+const SECTION_HEADING_PATTERN = /^(\s*[IVXLC]+\s*\.\s+\S|\s*\d+\s*\.\s+\S)/i;
 
 function fixtureLesson() {
   return fixtureLessonForChapter(2);
@@ -23,7 +23,7 @@ function fixtureLessonForChapter(chapterNumber: number) {
   return buildLessonDocumentModel("lesson-rules", cdr.lessons[0], chapter);
 }
 
-test("export title is uppercase and content heading contains only NỘI DUNG", () => {
+test("export title is uppercase and content heading contains NỘI DUNG with total duration", () => {
   const lesson = fixtureLesson();
   const lessonWithDuration = {
     ...lesson,
@@ -36,7 +36,7 @@ test("export title is uppercase and content heading contains only NỘI DUNG", (
   const blocks = composeDocumentBlocks(lessonWithDuration, []);
 
   assert.equal(blocks[0].text_preview, lesson.cdr_lesson.title.toLocaleUpperCase("vi-VN"));
-  assert.equal(blocks.find((block) => block.id === "generated-content-title")?.text_preview, "NỘI DUNG");
+  assert.equal(blocks.find((block) => block.id === "generated-content-title")?.text_preview, "NỘI DUNG (45 phút)");
 });
 
 test("teaching methods are inserted directly below numeric section headings", () => {
@@ -65,8 +65,8 @@ test("teaching methods are inserted directly below numeric section headings", ()
     const heading = composed[insertionIndex - 1];
     assert.match(
       heading.text_preview,
-      NUMERIC_SECTION_HEADING,
-      `method ${insertion.id} must follow a numeric section heading, not ${heading.text_preview}`
+      SECTION_HEADING_PATTERN,
+      `method ${insertion.id} must follow a section heading, not ${heading.text_preview}`
     );
   }
 });
@@ -79,7 +79,12 @@ test("real enrichment places every generated method below its numeric section", 
   for (const insertion of enrichment.insertions) {
     const insertionIndex = composed.findIndex((block) => block.id === insertion.block.id);
     assert.ok(insertionIndex > 0, `missing generated method ${insertion.id}`);
-    assert.match(composed[insertionIndex - 1].text_preview, NUMERIC_SECTION_HEADING);
+    const prev = composed[insertionIndex - 1].text_preview;
+    const prevPrev = insertionIndex > 1 ? composed[insertionIndex - 2].text_preview : "";
+    assert.ok(
+      SECTION_HEADING_PATTERN.test(prev) || SECTION_HEADING_PATTERN.test(prevPrev),
+      `method must follow a section heading, got: ${prev}`
+    );
   }
 });
 
@@ -89,7 +94,7 @@ test("content starts with NỘI DUNG without a copied chapter-title continuation
   const contentTitleIndex = blocks.findIndex((block) => block.id === "generated-content-title");
 
   assert.ok(contentTitleIndex >= 0);
-  assert.match(blocks[contentTitleIndex + 1]?.text_preview || "", NUMERIC_SECTION_HEADING);
+  assert.match(blocks[contentTitleIndex + 1]?.text_preview || "", SECTION_HEADING_PATTERN);
   assert.doesNotMatch(blocks[contentTitleIndex + 1]?.text_preview || "", /CỦA TÂM LÝ HỌC QUÂN SỰ/i);
 });
 
